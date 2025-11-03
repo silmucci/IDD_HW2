@@ -18,8 +18,8 @@ Eseguire:
 2. `TXTIndexer.java`
 3. `TXTSearcher.java`
 4. Interagire con `TXTSearcher.java` tramite console, inserendo query del tipo:
-- title:<termine>
-- content:<termine>
+- title:termine
+- content:termine
 oppure combinando i due campi o utilizzando più termini
 
 Dopo l’esecuzione di una query, il programma stampa in console:
