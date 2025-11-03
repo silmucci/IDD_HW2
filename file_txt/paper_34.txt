@@ -1,0 +1,1027 @@
+DUET: Dual Model Co-Training for Entire Space CTR Prediction
+
+Yutian Xiao
+Kuaishou Technology Co., Ltd.
+Beijing, China
+xiaoyutian@kuaishou.comMeng Yuan
+Kuaishou Technology Co., Ltd.
+Beijing, China
+yuanmeng05@kuaishou.comFuzhen Zhuang
+Independent Researcher
+Beijing, China
+zfz20081983@gmail.com
+Wei Chen
+Independent Researcher
+Beijing, China
+cwei_01@163.comShukuan Wang
+Kuaishou Technology Co., Ltd.
+Beijing, China
+wangshukuan@kuaishou.comShanqi Liu
+Kuaishou Technology Co., Ltd.
+Beijing, China
+liushanqi@kuaishou.com
+Chao Feng∗
+Kuaishou Technology Co., Ltd.
+Beijing, China
+fengchao08@kuaishou.comWenhui Yu
+Independent Researcher
+Beijing, China
+naywh@qq.comXiang Li
+Kuaishou Technology Co., Ltd.
+Beijing, China
+lixiang44@kuaishou.com
+Lantao Hu
+Kuaishou Technology Co., Ltd.
+Beijing, China
+hulantao@kuaishou.comHan Li
+Kuaishou Technology Co., Ltd.
+Beijing, China
+lihan08@kuaishou.comZhao Zhang
+Independent Researcher
+Beijing, China
+zhangzhao.cs.ai@gmail.com
+Abstract
+The pre-ranking stage plays a pivotal role in large-scale recom-
+mender systems but faces an intrinsic trade-off between model
+expressiveness and computational efficiency. Owing to the massive
+candidate pool and strict latency constraints, industry systems often
+rely on lightweight two-tower architectures, which are computa-
+tionally efficient yet limited in estimation capability. As a result,
+they struggle to capture the complex synergistic and suppressive
+relationships among candidate items, which are essential for pro-
+ducing contextually coherent and diverse recommendation lists.
+Moreover, this simplicity further amplifies the Sample Selection
+Bias (SSB) problem, as coarse-grained models trained on biased
+exposure data must generalize to a much larger candidate space
+with distinct distributions.
+To address these issues, we proposeDUET(DUal Model Co-
+Training forEntire Space CTR Prediction), a set-wise pre-ranking
+framework that achieves expressive modeling under tight compu-
+tational budgets. Instead of scoring items independently, DUET
+performs set-level prediction over the entire candidate subset in
+a single forward pass, enabling information-aware interactions
+among candidates while amortizing the computational cost across
+the set. Moreover, a dual model co-training mechanism extends su-
+pervision to unexposed items via mutual pseudo-label refinement,
+∗Corresponding authors.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+Conference acronym ’XX, Woodstock, NY
+©2018 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+ACM ISBN 978-1-4503-XXXX-X/2018/06
+https://doi.org/XXXXXXX.XXXXXXXeffectively mitigating SSB. Validated through extensive offline ex-
+periments and online A/B testing, DUET consistently outperforms
+state-of-the-art baselines and achieves improvements across multi-
+ple core business metrics. At present, DUET has been fully deployed
+in Kuaishou and Kuaishou Lite Apps, serving the main traffic for
+hundreds of millions of users.
+CCS Concepts
+•Information systems→Recommender systems;
+Keywords
+Recommender Systems, Click-Through Rate Estimation, Sample
+Selection Bias, Candidate Set
+ACM Reference Format:
+Yutian Xiao, Meng Yuan, Fuzhen Zhuang, Wei Chen, Shukuan Wang, Shanqi
+Liu, Chao Feng, Wenhui Yu, Xiang Li, Lantao Hu, Han Li, and Zhao Zhang.
+2018. DUET: Dual Model Co-Training for Entire Space CTR Prediction. In
+Proceedings of Make sure to enter the correct conference title from your rights
+confirmation email (Conference acronym ’XX).ACM, New York, NY, USA,
+10 pages. https://doi.org/XXXXXXX.XXXXXXX
+1 Introduction
+In industrial recommender systems, the pre-ranking stage must
+process thousands of candidates under millisecond-level latency.
+As a result, this stage heavily relies on simple two-tower architec-
+tures, which offer low inference cost but suffer from limited esti-
+mation capability [ 2,11,20,47,48]. The computational constraint
+prevents adopting sophisticated deep models, making pre-ranking
+the bottleneck of the entire recommendation cascade [ 39,53,61].
+Consequently, the model’s simplicity not only limits prediction
+accuracy but also gives rise to two closely coupled challenges that
+are particularly pronounced at the pre-ranking stage. [7, 12, 60].arXiv:2510.24369v1  [cs.IR]  28 Oct 2025
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY Trovato et al.
+Figure 1: The left and middle panels contrast a point-wise model, which overlooks item synergy, with a set-wise model that
+captures it. The right panel shows the cascading architecture, where multi-stage filtering creates severe SSB.
+Firstly, candidate items often exhibit complex synergistic and
+suppressive relationships, requiring models to capture inter-item
+dependencies. In practice, pre-ranking models commonly employ
+inner-product–based two-tower architectures to cope with time
+constraints, yet this design sacrifices expressive power and aggra-
+vates the limitations of point-wise scoring [ 17,44,62]. As illustrated
+in Figure 1, a point-wise prediction model would assign an excep-
+tionally high score to a timely and universally relevant news item
+(e.g., "Timely News: Beijing Heating to Start Tomorrow"). In con-
+trast, a commercial item such as “Ad:New Down Jacket,” which
+belongs to the long-tail category, would likely receive a relatively
+modest score and thus be filtered out. Yet, from a set-level perspec-
+tive, presenting the advertisement immediately after the heating
+news creates a strong synergy effect: the news stimulates user
+awareness of warmth needs, and the ad provides a precise solution.
+This context–product combination not only improves CTR but also
+enhances user value and commercial revenue.
+Secondly, the Sample Selection Bias (SSB) problem is even more
+severe in pre-ranking [ 16,28,29,52,58]. This is because pre-ranking
+operates at the largest candidate scale yet relies on the simplest
+model form. As illustrated in Figure 1, industrial recommender sys-
+tems employ a cascading architecture that progressively filters a
+vast item pool through multiple ranking stages, with only a few
+items ultimately displayed to users. The feedback used for model
+training is therefore collected exclusively from this final, heavily
+filtered exposure set, representing only a minute fraction of the
+initial candidate space. In contrast, the pre-ranking model must
+evaluate the entire upstream candidate set—often thousands of
+items per request—where the vast majority are unexposed and lack
+labels. This creates a much larger distributional gap between train-
+ing and inference compared with later stages [ 4,5,19]. Moreover,
+the lightweight two-tower models in pre-ranking lack sufficient
+expressiveness to infer reliable signals for unseen items, thereby
+exacerbating bias accumulation across cascaded stages.
+Critically, these two challenges are not independent. The point-
+wise paradigm, by isolating item scoring, reinforces users’ inherent
+preferences and traps them in information cocoons, thereby inten-
+sifying SSB. Existing studies remain confined to this paradigm, and
+both major categories of SSB methods still suffer from fundamental
+limitations. The first category is grounded in causal inference, such
+as Inverse Propensity Scoring (IPS) [ 33,43,55] and Doubly Robust(DR) methods [ 14,23,24], aiming to obtain unbiased estimates
+from exposed samples. However, their scope is strictly limited to
+the exposed space, overlooking the abundant signals contained in
+the vast unexposed data. The second category seeks to exploit un-
+exposed samples by generating pseudo-labels through techniques
+such as knowledge distillation and domain adaptation [ 26,53,56].
+Nevertheless, these methods typically depend on a single model
+to generate labels, which not only introduces substantial noise but
+also lacks effective error-correction mechanisms.
+To address the aforementioned challenges, we proposeDUET
+(DUal Model Co-Training forEntire Space CTR Prediction), a novel
+and practical framework that collaboratively tackles these two fun-
+damental issues. Our model introduces two key innovations: (i) Our
+framework departs from conventional two-tower designs and em-
+ploys a set-wise scoring mechanism that simultaneously captures
+intra-candidate dependencies and alleviates the computational bur-
+den. (ii) We introduce a dual model co-training mechanism that
+extends the supervisory signal to unexposed samples by interac-
+tively generating and correcting pseudo labels across the entire
+candidate set, thereby mitigating Sample Selection Bias.
+Extensive offline experiments and online A/B tests show that
+DUET consistently surpasses SOTA baselines and improves key
+business metrics at Kuaishou. It is now fully deployed in both the
+Kuaishou and Kuaishou Lite apps, serving hundreds of millions of
+users. To summarize, we highlight the key contributions of this
+paper as follows:
+•Framework:We propose DUET, a practical pre-ranking frame-
+work that adopts a set-wise scoring paradigm to achieve intra-
+candidate awareness under strict latency budgets, jointly tackles
+the intertwined challenges of set-level context modeling and SSB.
+•Methodology:We develop an efficient and stable set-level in-
+teraction module to model item dependencies, enabling list-wise
+optimization under strict latency constraints. And introduce a
+dual model co-training mechanism to mitigate SSB by extending
+supervision to unexposed data with robust pseudo-labels.
+•Experiment:Extensive offline and online A/B experiments vali-
+date DUET consistently outperforming SOTA methods and im-
+proving key business metrics. The framework has been fully
+deployed in both kuaishou and kuaishou lite app, supporting
+core traffic for hundreds of millions of users.
+DUET: Dual Model Co-Training for Entire Space CTR Prediction Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+2 Preliminary
+In this section, we will briefly introduce the problem definition used
+in this paper, in order to aid in the reader’s understanding.
+2.1 Problem Formulation
+For a given user 𝑢, we consider a candidate set 𝐶𝑢={𝑖 1,𝑖2,...,𝑖𝑚}
+returned from the retrieval stage, together with a user behavior
+sequence𝑆𝑢={𝑗 1,𝑗2,...,𝑗𝑛}. In conventional point-wise CTR pre-
+diction models such as DIN [ 64], each candidate item 𝑖∈𝐶𝑢is
+treated independently. The prediction score, i.e., the click-through
+probability, is computed based on the user-side features 𝑓𝑢(e.g., user
+ID, age, gender), item-side features 𝑓𝑖(e.g., item ID, category, author
+ID), cross features𝑓 𝑢𝑖, and the user behavior sequence{𝑓 𝑗}𝑗∈𝑆𝑢:
+ˆ𝑝𝑢,𝑖=DIN(𝑓𝑢,𝑓𝑖,𝑓𝑢𝑖,{𝑓𝑗}𝑗∈𝑆𝑢), 𝑖∈𝐶 𝑢.(1)
+This independent scoring overlooks the interactions among
+items when presented together, whereas an effective recommenda-
+tion list should form a coherent “content ecosystem” rather than
+a mere collection of high-scoring items. To this end, we adopt a
+candidate-set level modeling paradigm: the entire candidate set
+{(𝑓𝑖,𝑓𝑢𝑖)}𝑖∈𝐶𝑢, user features 𝑓𝑢, and behavior sequence {𝑓𝑗}𝑗∈𝑆𝑢are
+jointly fed into the model, which outputs all click probabilities in a
+single forward pass:
+ˆ𝒑𝑢=𝜎
+M(𝑓𝑢,{(𝑓𝑖,𝑓𝑢𝑖)}𝑖∈𝐶𝑢,{𝑓𝑗}𝑗∈𝑆𝑢;Θ)
+∈(0,1)|𝐶𝑢|,(2)
+whereM(·) denotes the prediction model parameterized by Θ,
+𝜎(·) is the element-wise sigmoid function, and ˆ𝒑𝑢is the predicted
+probability vector for the candidate set, with its 𝑖-th component
+ˆ𝑝𝑢,𝑖representing the click probability of item𝑖∈𝐶 𝑢.
+3 Framework
+To address the intertwined challenges of inadequate intra-candidate
+relationship modeling and severe Sample Selection Bias (SSB) that
+prevail in the pre-ranking stage of large-scale recommender sys-
+tems, we propose a novel framework, DUET. As depicted in Figure
+2, the DUET architecture is composed of two core components: a
+set-level modeling module to capture item interactions, and a dual
+model co-training mechanism to mitigate SSB. We will elaborate
+on each component in the following sections.
+3.1 Set-Level Modeling
+In large-scale recommender systems, traditional ranking models
+typically adopt a point-wise paradigm, where each candidate item
+is independently modeled to predict its click-through rate (CTR).
+However, this approach ignores the potential dependencies among
+items within the candidate set, often resulting in a recommendation
+list that is a simple stack of high-score items, lacking global consis-
+tency and diversity. To address this issue, we propose a set-level
+modeling approach, which simultaneously captures user–candidate
+interactions as well as intra-candidate relations to enhance the
+overall quality of recommendation results.
+Feature Representation.For a given user 𝑢, the inputs consist of
+their profile featuresf 𝑢, a candidate setC𝑢={𝑖 1,...,𝑖𝑚}of𝑚items,
+and a historical behavior sequence S𝑢={𝑗 1,...,𝑗𝑛}of length𝑛.
+We first map all high-dimensional sparse categorical features into
+low-dimensional dense vector representations via an embeddinglayer. This process yields four key feature matrices for subsequent
+interaction modeling:
+•Candidate Embedding MatrixF can∈R𝑚×𝑑: Stacked embed-
+dings of the𝑚candidate items.
+•Sequence Embedding MatrixF seq∈R𝑛×𝑑: Stacked embed-
+dings of the𝑛historical behavior items.
+•User Profile Embedding MatrixF 𝑢∈R𝑚×𝑑 𝑢: The user profile
+vectorf𝑢tiled𝑚times to match the candidate set dimension.
+•Cross Feature Embedding MatrixF cro∈R𝑚×𝑑 𝑐: Embeddings
+of user-item cross features for each candidate.
+User-Candidate Interaction Modeling.To accurately capture
+the alignment between a user’s dynamic interests and the candidate
+items, we must model the deep interactions between the candidate
+setF canand the user’s long behavior sequenceF seq. A standard
+attention mechanism, withF canas the Query andF seqas the Key
+and Value, would incur a computational complexity of 𝑂(𝑚𝑛) . This
+is computationally prohibitive in industrial scenarios where both
+𝑚and𝑛can be in the thousands or larger.
+To achieve efficient full-sequence interaction, we incorporate
+the Linear Attention mechanism [ 22]. By replacing the softmax
+function with a kernel function 𝜙(·) and leveraging the associative
+property of matrix multiplication, the computation order can be
+rearranged from(𝜙(Fcan)𝜙(Fseq)⊤)Fseqto𝜙(Fcan)(𝜙(Fseq)⊤Fseq).
+This transformation reduces the complexity from quadratic, 𝑂(𝑚𝑛) ,
+to linear,𝑂(𝑚+𝑛). The representationF c-sis defined as:
+Fc-s=LinearAttn(F can,Fseq,Fseq)∈R𝑚×𝑑,(3)
+where each row inF c-saggregates the interest representation for
+the corresponding candidate item, distilled from the user’s history.
+Intra-Candidate Relation Modeling.Beyond user-item match-
+ing, a high-quality recommendation list must account for the intrin-
+sic relationships among items. For instance, a news item followed
+by a contextually relevant advertisement can create a synergistic
+effect, whereas presenting multiple homogeneous items may lead
+to user fatigue. To capture these contextual dependencies, we de-
+sign a second attention stream that performs self-attention within
+the candidate set. We again employ Linear Attention to ensure
+computational efficiency. This process is formalized as:
+Fc-c=LinearAttn(F can,Fcan,Fcan)∈R𝑚×𝑑.(4)
+The matrixF c-cencodes the contextual information of each item
+within the current candidate "ecosystem," enabling the model to
+perceive collaborative and competitive relationships.
+Fusion and Prediction.Finally, we concatenate the outputs from
+the two attention modules,F c-sandF c-c, with the user profile em-
+beddingsF 𝑢and cross feature embeddingsF cro. This forms a final
+comprehensive feature representation matrixF final:
+Ffinal=Concat(F c-s,Fc-c,F𝑢,Fcro)∈R𝑚×𝑑 final.(5)
+This matrix is then fed into a Multi-Layer Perceptron (MLP) for
+non-linear transformation. A final Sigmoid activation function is
+applied to produce the predicted click-through rates (pCTR) for all
+𝑚candidate items simultaneously.
+ˆy=𝜎(MLP(F final))∈R𝑚×1(6)
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY Trovato et al.
+... ... ...Concat Concat Concat Concat Concat Concat Concat Concat Concat Concat
+User  Behaviors( n) Candidate Set( m) Cross Featur es(m)... ... ...Q Q K V V KLinear  Transformer Linear  Transformer... ... (m) (m)Concat... MLPs...pCTR
+1 0 0 Click Label: m candidate items
+...Backbone Model
+Model A
+Model B
+KL DivergenceLogit A Logit BCo-T raining
+User  Profile
+Featur es (1)Realshow Label: 
+Pseudo     Label: 
+MLP(256)MLP(64)MLP(1)
+Figure 2: An overview illustration of the DUET architecture.
+Through this set-wise modeling approach, our model not only
+predicts the individual relevance of each item but also optimizes
+the global utility of the entire recommendation list.
+Degree Normalization.While Linear Attention offers significant
+efficiency gains, the removal of the softmax function also eliminates
+its inherent normalization property. This can lead to numerical ex-
+plosion during the aggregation process, causing training instability.
+To address this issue, we draw inspiration from the normalization
+strategy employed in Graph Convolutional Networks (GCNs) [ 57].
+GCNs normalize aggregated features by the node degree to prevent
+features from high-degree nodes from dominating. Analogously,
+we can conceptualize the sum of similarities between a query and
+all keys as its "attention degree."
+We introduce a degree normalization term to stabilize the train-
+ing process. Specifically, the Linear Attention computation in Equa-
+tion 3 is reformulated as:
+E=D−1𝜙(Q)(𝜙(K)⊤V),(7)
+whereQ =Fcan, andK =V=Fseq. Here,Dis a diagonal matrix
+whose𝑖-th diagonal element is the sum of similarities between
+the𝑖-th query and all keys, defined asD =diag(𝜙( Q)𝜙(K)⊤1),
+with1being a column vector of ones. This degree normalization
+effectively regularizes the aggregation, ensuring training stability
+while preserving the linear complexity benefits.
+3.2 Co-Training
+To effectively mitigate the severe Sample Selection Bias (SSB) prob-
+lem arising from training solely on exposed feedback, we introducea dual model co-training mechanism. The core of this mechanism
+lies in utilizing two independent models to extend the supervi-
+sory signal from the sparse exposed space to the entire unexposed
+candidate space through interactive pseudo-labeling.
+Specifically, the framework comprises two models with identical
+architectures but independently initialized parameters, denoted as
+𝑀𝐴(·;𝜃𝐴)and𝑀𝐵(·;𝜃𝐵). For any given batch of candidates D, we
+partition it into two subsets: the exposed set D𝑜𝑏𝑠, which contains
+ground-truth labels {𝑦𝑖}, and the unexposed set D𝑢𝑛𝑜𝑏𝑠 , which lacks
+labels. The co-training mechanism operates as follows:
+Interactive Pseudo-Labeling.For samples 𝑥𝑖in the unexposed
+setD𝑢𝑛𝑜𝑏𝑠 , the two models act as mutual teachers to provide super-
+visory signals. Specifically, the learning target for model 𝑀𝐴(i.e.,
+the pseudo-label) is given by the prediction of model 𝑀𝐵, and vice
+versa. This process is formalized as:
+˜𝑦𝐴
+𝑖=𝑀𝐵(𝑥𝑖;𝜃𝐵)and ˜𝑦𝐵
+𝑖=𝑀𝐴(𝑥𝑖;𝜃𝐴),∀𝑥𝑖∈D𝑢𝑛𝑜𝑏𝑠 (8)
+where ˜𝑦𝐴
+𝑖and ˜𝑦𝐵
+𝑖are the soft pseudo-labels used to train 𝑀𝐴and
+𝑀𝐵, respectively. Since the models learn from different initial states,
+they capture distinct aspects and biases of the data, forming comple-
+mentary "views". This view diversity enables one model to correct
+potential errors made by the other in its pseudo-label generation,
+establishing a dynamic and adaptive error-correction loop that ef-
+fectively suppresses the confirmation bias common in single-model
+pseudo-labeling approaches.
+Consistency Regularization.While view diversity is crucial for
+the error-correction mechanism, excessive divergence can lead to
+noisy pseudo-labels and destabilize the training process. To strike
+DUET: Dual Model Co-Training for Entire Space CTR Prediction Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+a balance between diversity and consensus, we introduce a con-
+sistency regularization term that penalizes discrepancies between
+the predictive distributions of the two models. We treat the model
+outputs as parameters of a Bernoulli distribution and employ the
+symmetric Kullback-Leibler (KL) divergence to measure the differ-
+ence between these two distributions,𝑃 𝐴and𝑃𝐵:
+Lcon=E𝑥∈D[KL(𝑃𝐴(·|𝑥)||𝑃𝐵(·|𝑥))+KL(𝑃 𝐵(·|𝑥)||𝑃𝐴(·|𝑥))].(9)
+3.3 Optimization
+For model𝑀𝐴(·;𝜃𝐴), its objective is composed of two main compo-
+nents. The first is the supervised loss, L𝐴
+sup, which employs the BCE
+loss function. The source of supervision for this loss depends on the
+sample’s origin. For samples in the exposed set D𝑜𝑏𝑠, we use the
+ground-truth label 𝑦𝑖. Conversely, for samples in the unexposed set
+D𝑢𝑛𝑜𝑏𝑠 , we use the soft pseudo-label ˆ𝑦𝐵
+𝑖=𝜎(𝑀𝐵(𝑥𝑖;𝜃𝐵))generated
+by model𝑀𝐵, where𝜎(·) is the Sigmoid activation function. We
+define this conditional loss as follows:
+L𝐴
+sup=−E𝑥𝑖∈D"(
+LBCE(𝑦𝑖,ˆ𝑦𝐴
+𝑖)if𝑥𝑖∈D𝑜𝑏𝑠
+LBCE(ˆ𝑦𝐵
+𝑖,ˆ𝑦𝐴
+𝑖)if𝑥𝑖∈D𝑢𝑛𝑜𝑏𝑠#
+.(10)
+The second part is the consistency regularization term, Lconsist ,
+as defined previously, which aims to align the predictive distri-
+butions of the two models. Combining these two parts, the final
+optimization objective for model 𝑀𝐴, denoted asL𝐴, is defined as:
+L𝐴(𝜃𝐴,𝜃𝐵)=L𝐴
+sup+𝜆L con,(11)
+where𝜆is a hyperparameter that balances the importance of fitting
+the supervisory signals against maintaining inter-model consis-
+tency. The optimization objective for model 𝑀𝐵,L𝐵(𝜃𝐴,𝜃𝐵), is
+defined in a perfectly symmetric manner.
+3.4 Deployment of DUET
+DUET is deployed in Kuaishou’s production recommender system,
+serving hundreds of millions of users. As shown in Figure 3, the
+deployment consists of two main components: the Online Serving
+Architecture and the Offline Training Pipeline.
+Online Serving Architecture.Industrial recommender systems
+typically employ a multi-stage cascaded architecture to reconcile
+the trade-off between recommendation quality and system latency.
+Our framework DUET is deployed at the pre-ranking stage. Posi-
+tioned after retrieval, this stage is tasked with efficiently refining
+an initial candidate pool of 4,500 items into a higher-value subset
+of 600. This curated subset is then passed to subsequent modules
+for the final ranking presented to the user.
+Offline Training Pipeline.The offline training pipeline of DUET
+operates as an automated cyclical process with the following stages:
+(1)Log Processing:The process commences with a log processing
+module that collects real-time user interactions (e.g., clicks,
+watch time) with exposed items. These interactions form the
+basis for generating labeled training samples.
+(2)Entire Space Co-Training:To mitigate the severe Sample
+Selection Bias (SSB) from training only on exposed items, we in-
+corporate unexposed data. The framework’s dual models, Alice
+and Bob, perform corrective co-training by interactively gener-
+ating and refining pseudo-labels for each other on these samples.This mutual supervision enhances model generalization across
+the entire candidate space.
+(3)Model Update and Deployment:Upon completion of the
+training cycle, the superior performing model is deployed to
+the online serving environment, replacing the previous pre-
+ranking model. Notably, only one model is deployed to preserve
+efficiency and avoid redundant serving cost.
+Training
+SampleLog Pr ocessItem 
+Pool
+Offine Training
+Model Alice Model Bob4500 10 120 600 6
+FeedbackExposureRetrievalPre
+RankingRankingRe
+RankingEdge 
+Ranking
+Figure 3: The deployment of DUET at Kuaishou.
+4 Experiments
+To validate the performance of our DUET framework, we design and
+conduct comprehensive experimental studies. In this section, we
+present our experimental setup and results analysis. Specifically, our
+experiments aim to investigate the following research questions:
+•RQ1: How does DUET perform in offline experiments on real-
+world datasets compared to baseline models?
+•RQ2: How does each proposed module contribute to the perfor-
+mance?
+•RQ3: How do hyper-parameters influence the performance of
+DUET?
+•RQ4: How does DUET perform in real online CTR Prediction?
+4.1 Experimental Setup
+4.1.1 Datasets.We validate our approach on the Recflow dataset
+and further evaluate it using streaming data from Kuaishou’s pro-
+duction environment, demonstrating robustness in both academic
+and industrial contexts. Detailed statistics are provided in Table 1.
+Public Dataset:Since this study requires datasets that include
+candidate sets across the entire recommendation pipeline, to the
+best of our knowledge, RecFlow [ 30] is the only publicly available
+dataset that meets this requirement. RecFlow provides compre-
+hensive coverage of exposed and unexposed samples across all
+stages of the recommendation pipeline. Following prior work [44,
+45], we adopt the leave-one-out strategy to partition each user’s
+interactions into training, validation, and test sets.
+Private Dataset:To further validate the effectiveness of our
+model in real-world industrial settings, we train and evaluate the
+model directly on streaming data from Kuaishou’s online recom-
+mendation system to assess its performance in large-scale indus-
+trial environments. The dataset is collected from the real-time data
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY Trovato et al.
+streams of Kuaishou’s online recommendation system. It contin-
+uously receives exposure and click feedback from real users and
+covers the entire recommendation pipeline, ranging from candidate
+retrieval to final exposure.
+Table 1: The statistics of datasets (M: million, B: billion).
+Dataset User Item Sample Request Impression Click
+Recflow 42471 5M 524M 1.1M 4.8M 2.1M
+Industrial 144M 71M 75B 300M 980M 608M
+4.1.2 Evaluation Metrics.To evaluate model performance, we use
+AUC (Area Under the Curve) and UAUC (User-level AUC) as the
+primary performance metrics. Following [ 64], we adopt theRelative
+Improvement(RelaImpr) metric to evaluate model performance
+improvements. Considering a random guesser yields an AUC of 0.5,
+RelaImpr is defined as:
+RelaImpr=AUC(measured model)−0.5
+AUC(base model)−0.5−1
+×100%.(12)
+4.1.3 Baselines.To ensure a thorough assessment, the baselines
+are organized into two distinct categories.
+First, Causal Methods.The first group of methods aims to mitigate
+sample selection bias by integrating causal inference.
+•Multi-DR[ 59]: This method leverages multi-task learning to
+combine causal modeling and error imputation, thereby ensuring
+robustness to propensity misspecification.
+•Multi-IPS[ 59]: This method employs inverse propensity weight-
+ing within a multi-task learning framework to produce unbiased
+conversion rate estimates given accurate propensities.
+•DR-JL[51]: This method introduces a principled doubly robust
+approach to alleviate bias from inaccurate imputations and vari-
+ance from propensity estimation.
+•MRDR[ 18]: This method integrates theoretical variance reduc-
+tion with empirical joint learning to achieve stable and reliable
+debiasing under missing not at random conditions.
+•DCMT[ 65]: This method formulates conversion prediction as a
+causal multi-task problem and directly incorporates counterfac-
+tual samples to correct hidden negative biases.
+•DDPO[ 46]: This method combines causality-based optimization
+with dynamic soft-labeling, thereby enhancing generalization
+and robustness across both observed and unobserved samples.
+Second, Empirical Methods.This group of methods mitigates
+exposure bias by generating pseudo-labels for unexposed samples.
+•UKD[ 56]: This method formulates conversion prediction as a
+knowledge distillation task, explicitly incorporating unclicked
+samples with uncertainty modeling to enhance robustness.
+•SIDA[ 53]: This method adopts a domain adaptation module
+that generates exposure-independent pseudo labels to enhance
+robustness against exposure bias.
+•UECF[ 26]: This method generates reliable pseudo-labels for un-
+exposed samples through feature-level disentanglement, thereby
+mitigating exposure bias.4.1.4 Implementation Details.We select the optimal hyperparam-
+eters based on the AUC metric evaluated on the validation set.
+The maximum sequence length is fixed at 200, and the embed-
+ding dimension is uniformly set to 64 across both datasets. The
+AdamW optimizer is employed, with the learning rate chosen from
+{1e−3,5e−3,1e−4,5e−4,1e−5,5e−5}. All other hyperparameters
+are kept consistent with the original configurations reported in
+their respective studies. We adopt the widely used DIN model as
+the base CTR prediction framework [ 54,62]. All experiments are
+implemented in TensorFlow and executed on a computing envi-
+ronment equipped with 25 Intel Xeon CPU cores (2.10 GHz) and
+two NVIDIA RTX A10 GPUs, providing sufficient computational
+resources for large-scale training and hyperparameter optimization.
+4.2 Overall Performance (RQ1)
+Table 2 reports the comprehensive performance of all the com-
+pared baselines across Recflow and Industrial datasets. Based on
+the results, the main observations are as follows:
+•Compared with baseline methods in the category of causal infer-
+ence approaches (e.g., Multi-IPS, DR-JL, MRDR), DUET demon-
+strates significant and consistent improvements across all eval-
+uation metrics. While these causal estimators aim to achieve
+unbiased learning from observed exposure data, their core design
+is restricted to bias correction within the observed sample space,
+thereby failing to exploit the rich signals inherent in unexposed
+data. Although recent methods such as DCMT and DDPO attempt
+to incorporate unobserved samples, they still derive propensity
+scores solely from observed data and neglect the necessity of
+separately modeling the unobserved space. As a result, residual
+bias is introduced, ultimately limiting their effectiveness.
+•Within the family of empirical baselines, DUET consistently
+demonstrates superior performance. While these empirical meth-
+ods attempt to leverage unexposed samples, they typically rely
+on a single model to generate pseudo labels. This paradigm suf-
+fers from inherent limitations: it is prone to introducing sub-
+stantial noise, resulting in pseudo labels of uneven quality, and
+lacks effective error-correction mechanisms to ensure the gener-
+ation of high quality pseudo-labels. In contrast, the Co-Training
+framework of DUET establishes a dynamic error-correction loop
+through mutual supervision and information exchange between
+two models, thereby producing pseudo labels that are both higher
+in quality and more robust.
+•DUET’s consistently superior performance across diverse datasets
+demonstrates its robust generalization and industrial applicabil-
+ity. This robustness stems from systematically addressing two
+intertwined challenges: SSB and the absence of intra-candidate
+interaction modeling. DUET’s dual model co-training mecha-
+nism enables mutual supervision between models, generating
+high-quality pseudo-labels for unexposed samples. Additionally,
+its set-level modeling explicitly captures synergistic or suppres-
+sive relationships among candidates, which are overlooked by
+traditional point-wise methods. By capturing these interactions,
+DUET enhances recommendation lists’ global coherence and di-
+versity, proving particularly critical in industrial scenarios with
+large-scale, complex candidate sets.
+DUET: Dual Model Co-Training for Entire Space CTR Prediction Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+Table 2: The overall performance evaluation results of the
+proposed method and compared methods on two benchmark
+datasets. Results are grouped into heuristic and trainable
+methods. Within each group, the best and second-best perfor-
+mances are highlighted in bold and borderline, respectively.
+Numbers with an asterisk (*) indicate statistically significant
+improvements over the best trainable baseline (t-test with
+p-value < 0.05).
+ModelRecflow Industrial
+AUC RelaImpr AUC RelaImpr UAUC RelaImpr
+BaseModel 0.6127 NA 0.6730 NA 0.6675 NA
+Causal Estimation Scenario
+Multi-IPS 0.6141 1.24% 0.6755 1.47% 0.6679 0.27%
+Multi-DR 0.6133 0.53% 0.6751 1.24% 0.6677 0.12%
+DR-JL 0.6189 5.50% 0.6769 2.28% 0.6687 0.74%
+MRDR 0.6160 2.92% 0.6788 3.36% 0.6693 1.09%
+DCMT 0.6173 4.08% 0.6801 4.15% 0.6715 2.43%
+DDPO 0.6179 4.61% 0.6826 5.56% 0.6718 2.61%
+OURS 0.6322∗17.31% 0.6881∗8.73% 0.6787∗6.69%
+Empirical Estimation Scenario
+UKD 0.6171 3.91% 0.6812 4.76% 0.6694 1.19%
+SIDA 0.6235 9.58% 0.6824 5.44% 0.6731 3.36%
+UECF 0.6273 12.96% 0.6836 6.12% 0.6756 4.83%
+OURS 0.6322∗17.31% 0.6881∗8.73% 0.6787∗6.69%
+4.3 Ablation Study (RQ2)
+To evaluate the effectiveness of the proposed DUET framework, we
+conducted a series of ablation studies by removing three key com-
+ponents: the set-level interaction module (DUET w/o Set), the dual
+model co-training mechanism (DUET w/o Co), and the distribution
+alignment regularizer (DUET w/o KL). Table 3 presents our results,
+from which we derive the following important conclusions.
+•Among all ablations, removing the dual model co-training mech-
+anism (w/o Co) leads to the most pronounced performance degra-
+dation. This highlights the pivotal role of co-training in address-
+ing the SSB problem. Without this mechanism, the framework
+degenerates into a single model pseudo labeling paradigm, which
+is highly susceptible to confirmation bias and thus fails to gener-
+ate reliable and high quality labels. By contrast, DUET leverages
+a dual model architecture in which two independently parame-
+terized models mutually supervise each other, forming a dynamic
+error correction loop. The design guarantees the reliability and
+robustness of the generated pseudo labels, thereby strengthening
+the model’s generalization across the entire data space.
+•Removing the set-level interaction module (w/o Set) also causes a
+notable decline in performance. This finding underscores the ne-
+cessity of explicitly modeling the complex dependencies among
+items within a candidate set during the pre-ranking phase. Tradi-
+tional point-wise methods evaluate candidates in isolation, over-
+looking the synergistic or suppressive effects that arise when
+items are jointly presented. In contrast, DUET’s set-level moduleleverages a self-attention mechanism to capture such contextual
+information, transforming the prediction task from independent
+item scoring into a holistic list-wise optimization problem. This
+enables the model to generate more coherent and diverse recom-
+mendations that better align with user preferences.
+•Ablating the distribution alignment regularization term (w/o KL)
+impairs model performance. The essence of co-training lies in
+leveraging the complementary perspectives of two independent
+models for mutual correction and reinforcement. However, this
+view discrepancy is a double-edged sword. On one hand, it gen-
+erates diverse supervisory signals, preventing either model from
+converging to a local optimum. On the other hand, if left uncon-
+strained, it can exacerbate predictive divergence between the
+models, leading to conflicting pseudo-labels and ultimately dis-
+rupting the collaborative mechanism. To balance this trade-off,
+We introduce KL divergence as a soft constraint not to eliminate
+these model discrepancies, but to guide them.
+Table 3: Performance of design variants on two datasets. Bold
+numbers denote the largest performance changes.
+ModelRecflow Industrial
+AUC RelaImpr AUC RelaImpr UAUC RelaImpr
+DUET 0.6322 0.00% 0.6881 0.00% 0.6787 0.00%
+w/o Set 0.6279 -3.36% 0.6813 -3.75% 0.6732 -3.16%
+w/o Co 0.6257 -5.17% 0.6792 -4.97% 0.6703 -4.93%
+w/o KL 0.6306 -1.22% 0.6834 -2.56% 0.6749 -2.17%
+4.4 In-depth Analysis (RQ3)
+The regularization coefficient 𝜆governs the essential trade-off be-
+tween view diversity and prediction consensus in the dual model.
+We conduct a sensitivity analysis to examine its impact, and the
+results are shown in Figure 4.
+We observe a clear unimodal relationship between 𝜆and model
+performance, validating the underlying rationale of our design.
+When𝜆is too small, the weak constraint allows excessive diver-
+gence between the two models. Their predictions drift apart, pro-
+ducing inconsistent pseudo-labels that undermine the co-training
+mechanism. Conversely, an overly large 𝜆forces the models into
+homogenization. Although this ensures consistency, it suppresses
+the diversity needed for mutual correction and causes the paradigm
+to degenerate into self-training. for mutual correction and causes.
+0.1 0.15 0.2 0.25 0.3 0.5 0.75 1.0
+0.62000.62250.62500.62750.63000.63250.6350Metric
+(a) Recflow Dataset
+Recflow_AUC
+0.01 0.05 0.1 0.15 0.2 0.25 0.3 0.5
+0.67000.67250.67500.67750.68000.68250.68500.68750.6900
+(b) Industrial Dataset
+Industrial_AUC
+Industrial_UAUC
+Figure 4: The impact of the regularization strength𝜆.
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY Trovato et al.
+4.5 Online Result (RQ4)
+To evaluate the performance of the DUET framework in a real-world
+industrial environment, we deployed a two-week online A/B test
+on both the Kuaishou and Kuaishou Lite applications. As detailed
+in Table 4, the experimental results clearly demonstrate that our
+proposed model surpasses the baseline across multiple core business
+metrics, achieving statistically significant improvements.
+Specifically, DUET delivered significant growth in user engage-
+ment and retention. On the Kuaishou app, for instance, Total Watch
+Time and Avg. App Usage Time increased by +0.195% and +0.147%,
+respectively. This indicates that by generating more accurate predic-
+tions over the entire candidate space and modeling item synergies,
+DUET produces more compelling recommendation lists, thereby
+effectively enhancing user retention and consumption depth.
+Furthermore, DUET fosters a healthier content ecosystem and
+drives long-term value. This is evidenced by significant uplifts in
+diversity-oriented metrics, including Avg. Novel Cluster (+0.173%)
+and Avg. Surprise Cluster Exposure (+0.165%). These results under-
+score DUET’s capacity to surface novel content, thereby mitigating
+the risk of filter bubbles and broadening user interest boundaries.
+These improvements in content ecology, together with the retention
+gains, demonstrate that the model delivers tangible and multifac-
+eted value in a large-scale production environment.
+Table 4: A/B test performance on Kuaishou and Kuaishou Lite
+across engagement metrics. The Improvement column re-
+ports the relative percentage uplift of the treatment over
+the control. The Confidence Interval (CI) provides a range of
+plausible values for the true uplift. A CI that does not contain
+0 indicates that the result is statistically significant.
+Scenario Metric Improv. CI
+KuaishouAvg. App Usage Time +0.147% [0.07%, 0.22%]
+Total Watch Time +0.195% [0.09%, 0.30%]
+Video Watch Time +0.125% [0.00%, 0.25%]
+Avg. Suprise Cluster +0.165% [0.09%, 0.24%]
+Avg. Novel Cluster +0.173% [0.11%, 0.24%]
+Avg. Long-Term Cluster Exp. +0.100% [0.03%, 0.17%]
+Avg. Accurately Interest +0.149% [0.05%, 0.24%]
+Kuaishou
+LiteAvg. App Usage Time +0.049% [0.01%, 0.09%]
+Total Watch Time +0.061% [0.01%, 0.11%]
+Video Watch Time +0.056% [0.01%, 0.10%]
+Number of Novel Interests +0.058% [0.01%, 0.11%]
+Avg. Long-Term Interest Exp. +0.041% [0.01%, 0.08%]
+Avg. Cluster Exp. +0.051% [0.02%, 0.08%]
+Avg. Effectively Clusters +0.050% [0.01%, 0.08%]
+5 Related Work
+In this section, we review two relevant prior works: Click-through
+rate model and sample selection bias.
+5.1 Click-Through-Rate Prediction
+Research on CTR prediction progressed from linear and shallow
+factorization models, including Logistic Regression (LR) [ 32], Factor-
+ization Machines (FM) [ 41], and Field-aware Factorization Machines(FFM) [ 21], to deep architectures that combine memorization and
+generalization. Wide & Deep [ 13], DeepFM [ 17], and DCN [ 49,50]
+enable end-to-end learning of higher-order feature interactions. To
+model evolving interests, the DIN family adopts behavior-sequence
+modeling and advances from relevance attention to interest evo-
+lution, short-term preference modeling, and unified treatment of
+short and long terms [ 10,15,63,64]. Leveraging extended user
+histories is also crucial: HPMN [ 40] and MIMN [ 35] use external
+memory networks to preserve persistent preferences. To reduce
+the inconsistency between short and long terms, retrieval then
+modeling frameworks first retrieve salient subsequences and then
+apply specialized modeling. SIM [ 36] and UBR4CTR [ 37,38] follow
+this design; ETA [ 9] and SDIM [ 3] improve retrieval precision with
+locality-sensitive hashing and signature mechanisms. TWIN-V2
+[44] scales historical modeling to106behaviors using hierarchi-
+cal clustering with cluster-aware attention, enabling long range
+retrieval with real time efficiency.
+5.2 Sample Selection Bias
+Sample Selection Bias (SSB) is a critical challenge in recommender
+systems and online advertising, arising because models are trained
+on biased data from observed user feedback but must perform infer-
+ence on the entire, unbiased data space [ 5,6,27,31,34]. Causal infer-
+ence is a primary approach to mitigate Sample Selection Bias (SSB).
+Initial work employed methods like Inverse Propensity Scoring (IPS)
+[1,8,31,55] and Doubly Robust (DR) estimators [ 25,42,45,66],
+as demonstrated in the doubly robust joint learning approach for
+recommendation. These have been enhanced in frameworks like
+MRDR [ 18] to reduce variance, and in Multi-IPW/Multi-DR [ 59] to
+combat data sparsity via multi-task learning. Advanced methods
+extend this by leveraging the entire data space, often by generating
+pseudo-labels for unobserved samples. This is achieved through
+techniques such as the dual propensity networks in DDPO [ 46],
+the counterfactual framework in DCMT [ 65], and the uncertainty-
+regularized knowledge distillation in UKD [ 56]. Specifically for
+the challenging pre-ranking stage, comprehensive frameworks like
+SIDA [ 53] combine sample selection with unbiased distillation,
+while UECF [ 26] introduces an unbiased causal framework with
+automatic sample filtering to ensure theoretical unbiasedness.
+6 Conclusion
+This paper addresses the critical, intertwined challenges of Sam-
+ple Selection Bias (SSB) and point-wise scoring limitations in the
+pre-ranking stage of recommender systems. We proposed DUET, a
+novel framework that integrates a dual model co-training mecha-
+nism with an efficient set-level interaction module. The co-training
+paradigm effectively mitigates SSB by extending supervision to
+the entire candidate space via interactive pseudo-label generation
+and error correction. Simultaneously, the set-level module captures
+complex inter-item dependencies, enabling holistic list-wise opti-
+mization. Extensive offline experiments and large-scale online A/B
+tests have validated DUET’s significant superiority over state-of-
+the-art baselines. Its successful deployment in Kuaishou, serving
+hundreds of millions of users and improving key business metrics,
+demonstrates its profound practical value and industrial impact.
+DUET: Dual Model Co-Training for Entire Space CTR Prediction Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+References
+[1]Victoria Allan, Sreeram V Ramagopalan, Jack Mardekian, Aaron Jenkins, Xiaoyan
+Li, Xianying Pan, and Xuemei Luo. 2020. Propensity score matching and inverse
+probability of treatment weighting to address confounding by indication in
+comparative effectiveness research of oral anticoagulants.Journal of comparative
+effectiveness research9, 9 (2020), 603–614.
+[2]Jiangxia Cao, Shen Wang, Yue Li, Shenghui Wang, Jian Tang, Shiyao Wang,
+Shuang Yang, Zhaojie Liu, and Guorui Zhou. 2024. Moment&Cross: Next-
+Generation Real-Time Cross-Domain CTR Prediction for Live-Streaming Recom-
+mendation at Kuaishou.arXiv preprint arXiv:2408.05709(2024).
+[3]Yue Cao, XiaoJiang Zhou, Jiaqi Feng, Peihao Huang, Yao Xiao, Dayao Chen, and
+Sheng Chen. 2022. Sampling Is All You Need on Modeling Long-Term User
+Behaviors for CTR Prediction. arXiv:2205.10249 [cs.IR] https://arxiv.org/abs/
+2205.10249
+[4]Jiawei Chen, Hande Dong, Yang Qiu, Xiangnan He, Xin Xin, Liang Chen, Guli
+Lin, and Keping Yang. 2021. AutoDebias: Learning to debias for recommendation.
+InProceedings of the 44th international ACM SIGIR conference on research and
+development in information retrieval. 21–30.
+[5]Jiawei Chen, Hande Dong, Xiang Wang, Fuli Feng, Meng Wang, and Xiangnan
+He. 2023. Bias and debias in recommender system: A survey and future directions.
+ACM Transactions on Information Systems41, 3 (2023), 1–39.
+[6]Jiawei Chen, Xiang Wang, Fuli Feng, and Xiangnan He. 2021. Bias issues and
+solutions in recommender system: Tutorial on the RecSys 2021. InProceedings of
+the 15th ACM conference on recommender systems. 825–827.
+[7] Jiaju Chen, Wang Wenjie, Chongming Gao, Peng Wu, Jianxiong Wei, and Qing-
+song Hua. 2024. Treatment Effect Estimation for User Interest Exploration on
+Recommender Systems. InProceedings of the 47th International ACM SIGIR Con-
+ference on Research and Development in Information Retrieval. 1861–1871.
+[8]Jeffrey W Chen, David R Maldonado, Brooke L Kowalski, Kara B Miecznikowski,
+Cynthia Kyin, Jeffrey A Gornbein, and Benjamin G Domb. 2022. Best practice
+guidelines for propensity score methods in medical research: consideration on
+theory, implementation, and reporting. A review.Arthroscopy: The Journal of
+Arthroscopic & Related Surgery38, 2 (2022), 632–642.
+[9]Qiwei Chen, Changhua Pei, Shanshan Lv, Chao Li, Junfeng Ge, and Wenwu
+Ou. 2021. End-to-End User Behavior Retrieval in Click-Through RatePrediction
+Model. arXiv:2108.04468 [cs.IR] https://arxiv.org/abs/2108.04468
+[10] Qiwei Chen, Huan Zhao, Wei Li, Pipei Huang, and Wenwu Ou. 2019. Behavior
+sequence transformer for e-commerce recommendation in alibaba. InProceedings
+of the 1st international workshop on deep learning practice for high-dimensional
+sparse data. 1–4.
+[11] Xiaoshuang Chen, Yibo Wang, Yao Wang, Husheng Liu, Kaiqiao Zhan, Ben Wang,
+and Kun Gai. 2025. Creator-Side Recommender System: Challenges, Designs,
+and Applications. InCompanion Proceedings of the ACM on Web Conference 2025.
+162–170.
+[12] Xiaoshuang Chen, Gengrui Zhang, Yao Wang, Yulin Wu, Shuo Su, Kaiqiao Zhan,
+and Ben Wang. 2024. Cache-Aware Reinforcement Learning in Large-Scale
+Recommender Systems. InCompanion Proceedings of the ACM Web Conference
+2024. 284–291.
+[13] Heng-Tze Cheng, Levent Koc, Jeremiah Harmsen, Tal Shaked, Tushar Chandra,
+Hrishi Aradhye, Glen Anderson, Greg Corrado, Wei Chai, Mustafa Ispir, et al .
+2016. Wide & deep learning for recommender systems. InProceedings of the 1st
+workshop on deep learning for recommender systems. 7–10.
+[14] Quanyu Dai, Haoxuan Li, Peng Wu, Zhenhua Dong, Xiao-Hua Zhou, Rui Zhang,
+Rui Zhang, and Jie Sun. 2022. A generalized doubly robust learning framework
+for debiasing post-click conversion rate prediction. InProceedings of the 28th
+ACM SIGKDD Conference on Knowledge Discovery and Data Mining. 252–262.
+[15] Yufei Feng, Fuyu Lv, Weichen Shen, Menghan Wang, Fei Sun, Yu Zhu, and Keping
+Yang. 2019. Deep session interest network for click-through rate prediction.
+arXiv preprint arXiv:1905.06482(2019).
+[16] Jingyue Gao, Shuguang Han, Han Zhu, Siran Yang, Yuning Jiang, Jian Xu, and
+Bo Zheng. 2023. Rec4ad: A free lunch to mitigate sample selection bias for ads
+ctr prediction in taobao. InProceedings of the 32nd ACM International Conference
+on Information and Knowledge Management. 4574–4580.
+[17] Huifeng Guo, Ruiming Tang, Yunming Ye, Zhenguo Li, and Xiuqiang He. 2017.
+DeepFM: a factorization-machine based neural network for CTR prediction.arXiv
+preprint arXiv:1703.04247(2017).
+[18] Siyuan Guo, Lixin Zou, Yiding Liu, Wenwen Ye, Suqi Cheng, Shuaiqiang Wang,
+Hechang Chen, Dawei Yin, and Yi Chang. 2021. Enhanced doubly robust learning
+for debiasing post-click conversion rate estimation. InProceedings of the 44th
+International ACM SIGIR Conference on Research and Development in Information
+Retrieval. 275–284.
+[19] Jin Huang, Harrie Oosterhuis, and Maarten De Rijke. 2022. It is different when
+items are older: Debiasing recommendations when selection bias and user pref-
+erences are dynamic. InProceedings of the fifteenth ACM international conference
+on web search and data mining. 381–389.
+[20] Jian Jia, Yipei Wang, Yan Li, Honggang Chen, Xuehan Bai, Zhaocheng Liu, Jian
+Liang, Quan Chen, Han Li, Peng Jiang, et al .2025. LEARN: Knowledge Adaptationfrom Large Language Model to Recommendation for Practical Industrial Appli-
+cation. InProceedings of the AAAI Conference on Artificial Intelligence, Vol. 39.
+11861–11869.
+[21] Yuchin Juan, Yong Zhuang, Wei-Sheng Chin, and Chih-Jen Lin. 2016. Field-
+aware factorization machines for CTR prediction. InProceedings of the 10th ACM
+conference on recommender systems. 43–50.
+[22] Angelos Katharopoulos, Apoorv Vyas, Nikolaos Pappas, and François Fleuret.
+2020. Transformers are rnns: Fast autoregressive transformers with linear atten-
+tion. InInternational conference on machine learning. PMLR, 5156–5165.
+[23] Haoxuan Li, Quanyu Dai, Yuru Li, Yan Lyu, Zhenhua Dong, Xiao-Hua Zhou, and
+Peng Wu. 2023. Multiple robust learning for recommendation. InProceedings of
+the AAAI conference on artificial intelligence, Vol. 37. 4417–4425.
+[24] Haoxuan Li, Yan Lyu, Chunyuan Zheng, and Peng Wu. 2022. TDR-CL: Tar-
+geted doubly robust collaborative learning for debiased recommendations.arXiv
+preprint arXiv:2203.10258(2022).
+[25] Haoxuan Li, Chunyuan Zheng, and Peng Wu. 2022. StableDR: Stabilized doubly
+robust learning for recommendation on data missing not at random.arXiv
+preprint arXiv:2205.04701(2022).
+[26] Xuanlin Li, Xiangyu Cai, Hao Peng, Jia Duan, Wei Wang, Zehua Zhang, Chang-
+ping Peng, Zhangang Lin, Ching Law, and Jingping Shao. 2025. An Unbi-
+ased Entire-Space Causal Framework for Click-Through Rate Estimation in
+Pre-Ranking. InCompanion Proceedings of the ACM on Web Conference 2025.
+306–314.
+[27] Yongkang Li, Xingyu Zhu, Yuheng Wu, Wenxu Zhao, and Xiaona Xia. 2025. A
+Survey on Causal Inference-Driven Data Bias Optimization in Recommenda-
+tion Systems: Principles, Opportunities and Challenges.Wiley Interdisciplinary
+Reviews: Data Mining and Knowledge Discovery15, 2 (2025), e70020.
+[28] Jiaye Lin, Qing Li, Guorui Xie, Zhongxu Guan, Yong Jiang, Ting Xu, Zhong
+Zhang, and Peilin Zhao. 2024. Mitigating Sample Selection Bias with Robust
+Domain Adaption in Multimedia Recommendation. InProceedings of the 32nd
+ACM International Conference on Multimedia. 7581–7590.
+[29] Haochen Liu, Da Tang, Ji Yang, Xiangyu Zhao, Hui Liu, Jiliang Tang, and Youlong
+Cheng. 2022. Rating distribution calibration for selection bias mitigation in
+recommendations. InProceedings of the ACM web conference 2022. 2048–2057.
+[30] Qi Liu, Kai Zheng, Rui Huang, Wuchao Li, Kuo Cai, Yuan Chai, Yanan Niu,
+Yiqun Hui, Bing Han, Na Mou, et al .2024. Recflow: An industrial full flow
+recommendation dataset.arXiv preprint arXiv:2410.20868(2024).
+[31] Teng Ma and Su Yu. 2023. De-Selection Bias Recommendation Algorithm Based
+on Propensity Score Estimation.Applied Sciences13, 14 (2023), 8038.
+[32] H Brendan McMahan, Gary Holt, David Sculley, Michael Young, Dietmar Ebner,
+Julian Grady, Lan Nie, Todd Phillips, Eugene Davydov, Daniel Golovin, et al .
+2013. Ad click prediction: a view from the trenches. InProceedings of the 19th
+ACM SIGKDD international conference on Knowledge discovery and data mining.
+1222–1230.
+[33] Zohreh Ovaisi, Ragib Ahsan, Yifan Zhang, Kathryn Vasilaky, and Elena Zheleva.
+2020. Correcting for selection bias in learning-to-rank systems. InProceedings of
+the web conference 2020. 1863–1873.
+[34] Weishen Pan, Sen Cui, Hongyi Wen, Kun Chen, Changshui Zhang, and Fei Wang.
+2021. Correcting the user feedback-loop bias for recommendation systems.arXiv
+preprint arXiv:2109.06037(2021).
+[35] Qi Pi, Weijie Bian, Guorui Zhou, Xiaoqiang Zhu, and Kun Gai. 2019. Practice
+on Long Sequential User Behavior Modeling for Click-Through Rate Prediction.
+InProceedings of the 25th ACM SIGKDD International Conference on Knowledge
+Discovery &; Data Mining (KDD ’19). ACM, 2671–2679. doi:10.1145/3292500.
+3330666
+[36] Pi Qi, Xiaoqiang Zhu, Guorui Zhou, Yujing Zhang, Zhe Wang, Lejian
+Ren, Ying Fan, and Kun Gai. 2020. Search-based User Interest Modeling
+with Lifelong Sequential Behavior Data for Click-Through Rate Prediction.
+arXiv:2006.05639 [cs.IR] https://arxiv.org/abs/2006.05639
+[37] Jiarui Qin, Weinan Zhang, Rong Su, Zhirong Liu, Weiwen Liu, Guangpeng Zhao,
+Hao Li, Ruiming Tang, Xiuqiang He, and Yong Yu. 2023. Learning to retrieve user
+behaviors for click-through rate estimation.ACM Transactions on Information
+Systems41, 4 (2023), 1–31.
+[38] Jiarui Qin, Weinan Zhang, Xin Wu, Jiarui Jin, Yuchen Fang, and Yong Yu. 2020.
+User Behavior Retrieval for Click-Through Rate Prediction. InProceedings of
+the 43rd International ACM SIGIR Conference on Research and Development in
+Information Retrieval (SIGIR ’20). ACM, 2347–2356. doi:10.1145/3397271.3401440
+[39] Jiarui Qin, Jiachen Zhu, Bo Chen, Zhirong Liu, Weiwen Liu, Ruiming Tang, Rui
+Zhang, Yong Yu, and Weinan Zhang. 2022. Rankflow: Joint optimization of multi-
+stage cascade ranking systems as flows. InProceedings of the 45th International
+ACM SIGIR Conference on Research and Development in Information Retrieval.
+814–824.
+[40] Kan Ren, Jiarui Qin, Yuchen Fang, Weinan Zhang, Lei Zheng, Weijie Bian, Guorui
+Zhou, Jian Xu, Yong Yu, Xiaoqiang Zhu, and Kun Gai. 2019. Lifelong Sequential
+Modeling with Personalized Memorization for User Response Prediction. In
+Proceedings of the 42nd International ACM SIGIR Conference on Research and
+Development in Information Retrieval (SIGIR ’19). ACM, 565–574. doi:10.1145/
+3331184.3331230
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY Trovato et al.
+[41] Steffen Rendle. 2010. Factorization machines. In2010 IEEE International conference
+on data mining. IEEE, 995–1000.
+[42] Yuta Saito. 2020. Doubly robust estimator for ranking metrics with post-click
+conversions. InProceedings of the 14th ACM Conference on Recommender Systems.
+92–100.
+[43] Tobias Schnabel, Adith Swaminathan, Ashudeep Singh, Navin Chandak, and
+Thorsten Joachims. 2016. Recommendations as treatments: Debiasing learning
+and evaluation. Ininternational conference on machine learning. PMLR, 1670–
+1679.
+[44] Zihua Si, Lin Guan, ZhongXiang Sun, Xiaoxue Zang, Jing Lu, Yiqun Hui, Xingchao
+Cao, Zeyu Yang, Yichen Zheng, Dewei Leng, et al .2024. Twin v2: Scaling ultra-
+long user behavior sequence modeling for enhanced ctr prediction at kuaishou.
+InProceedings of the 33rd ACM International Conference on Information and
+Knowledge Management. 4890–4897.
+[45] Zijie Song, Jiawei Chen, Sheng Zhou, Qihao Shi, Yan Feng, Chun Chen, and Can
+Wang. 2023. CDR: Conservative doubly robust learning for debiased recommen-
+dation. InProceedings of the 32nd ACM international conference on information
+and knowledge management. 2321–2330.
+[46] Hongzu Su, Lichao Meng, Lei Zhu, Ke Lu, and Jingjing Li. 2024. DDPO: Direct dual
+propensity optimization for post-click conversion rate estimation. InProceedings
+of the 47th International ACM SIGIR Conference on Research and Development in
+Information Retrieval. 1179–1188.
+[47] Shuo Su, Xiaoshuang Chen, Yao Wang, Yulin Wu, Ziqiang Zhang, Kaiqiao Zhan,
+Ben Wang, and Kun Gai. 2024. RPAF: A Reinforcement Prediction-Allocation
+Framework for Cache Allocation in Large-Scale Recommender Systems. InPro-
+ceedings of the 18th ACM Conference on Recommender Systems. 670–679.
+[48] Maolin Wang, Yutian Xiao, Binhao Wang, Sheng Zhang, Shanshan Ye, Wanyu
+Wang, Hongzhi Yin, Ruocheng Guo, and Zenglin Xu. 2025. FindRec: Stein-Guided
+Entropic Flow for Multi-Modal Sequential Recommendation. InProceedings of
+the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2.
+3008–3018.
+[49] Ruoxi Wang, Bin Fu, Gang Fu, and Mingliang Wang. 2017. Deep & cross network
+for ad click predictions. InProceedings of the ADKDD’17. 1–7.
+[50] Ruoxi Wang, Rakesh Shivanna, Derek Cheng, Sagar Jain, Dong Lin, Lichan Hong,
+and Ed Chi. 2021. Dcn v2: Improved deep & cross network and practical lessons
+for web-scale learning to rank systems. InProceedings of the web conference 2021.
+1785–1797.
+[51] Xiaojie Wang, Rui Zhang, Yu Sun, and Jianzhong Qi. 2019. Doubly robust joint
+learning for recommendation on data missing not at random. InInternational
+Conference on Machine Learning. PMLR, 6638–6647.
+[52] Xiaojie Wang, Rui Zhang, Yu Sun, and Jianzhong Qi. 2021. Combating selection
+biases in recommender systems with a few unbiased ratings. InProceedings of
+the 14th ACM International Conference on Web Search and Data Mining. 427–435.
+[53] Jianping Wei, Yujie Zhou, Zhengwei Wu, and Ziqi Liu. 2024. Enhancing pre-
+ranking performance: Tackling intermediary challenges in multi-stage cascading
+recommendation systems. InProceedings of the 30th ACM SIGKDD Conference on
+Knowledge Discovery and Data Mining. 5950–5958.
+[54] Yutian Xiao, Shukuan Wang, Binhao Wang, Zhao Zhang, Yanze Zhang, Shanqi
+Liu, Chao Feng, Xiang Li, and Fuzhen Zhuang. 2025. MARS: Modality-AlignedRetrieval for Sequence Augmented CTR Prediction. arXiv:2509.01184 [cs.IR]
+https://arxiv.org/abs/2509.01184
+[55] Chen Xu, Jun Xu, Xu Chen, Zhenghua Dong, and Ji-Rong Wen. 2022. Dually
+enhanced propensity score estimation in sequential recommendation. InPro-
+ceedings of the 31st ACM International Conference on Information & Knowledge
+Management. 2260–2269.
+[56] Zixuan Xu, Penghui Wei, Weimin Zhang, Shaoguo Liu, Liang Wang, and Bo Zheng.
+2022. Ukd: Debiasing conversion rate estimation via uncertainty-regularized
+knowledge distillation. InProceedings of the ACM Web Conference 2022. 2078–
+2087.
+[57] Wenhui Yu, Xiao Lin, Jinfei Liu, Junfeng Ge, Wenwu Ou, and Zheng Qin. 2021.
+Self-propagation graph neural network for recommendation.IEEE Transactions
+on Knowledge and Data Engineering34, 12 (2021), 5993–6002.
+[58] Fan Zhang, Wenjie Luo, and Xiudan Yang. 2025. Mitigating Selection Bias in
+Recommendation Systems Through Sentiment Analysis and Dynamic Debiasing.
+Applied Sciences15, 8 (2025), 4170.
+[59] Wenhao Zhang, Wentian Bao, Xiao-Yang Liu, Keping Yang, Quan Lin, Hong Wen,
+and Ramin Ramezani. 2020. Large-scale causal approaches to debiasing post-click
+conversion rate estimation with multi-task learning. InProceedings of the web
+conference 2020. 2775–2781.
+[60] Binglei Zhao, Houying Qi, Guang Xu, Mian Ma, Xiwei Zhao, Feng Mei, Sulong
+Xu, and Jinghe Hu. 2025. A Hybrid Cross-Stage Coordination Pre-ranking Model
+for Online Recommendation Systems. InCompanion Proceedings of the ACM on
+Web Conference 2025. 621–630.
+[61] Kai Zheng, Haijun Zhao, Rui Huang, Beichuan Zhang, Na Mou, Yanan Niu, Yang
+Song, Hongning Wang, and Kun Gai. 2024. Full stage learning to rank: A unified
+framework for multi-stage systems. InProceedings of the ACM Web Conference
+2024. 3621–3631.
+[62] Guorui Zhou, Na Mou, Ying Fan, Qi Pi, Weijie Bian, Chang Zhou, Xiaoqiang Zhu,
+and Kun Gai. 2018. Deep Interest Evolution Network for Click-Through Rate
+Prediction. arXiv:1809.03672 [stat.ML] https://arxiv.org/abs/1809.03672
+[63] Guorui Zhou, Na Mou, Ying Fan, Qi Pi, Weijie Bian, Chang Zhou, Xiaoqiang
+Zhu, and Kun Gai. 2019. Deep interest evolution network for click-through rate
+prediction. InProceedings of the AAAI conference on artificial intelligence, Vol. 33.
+5941–5948.
+[64] Guorui Zhou, Xiaoqiang Zhu, Chenru Song, Ying Fan, Han Zhu, Xiao Ma, Yanghui
+Yan, Junqi Jin, Han Li, and Kun Gai. 2018. Deep interest network for click-through
+rate prediction. InProceedings of the 24th ACM SIGKDD international conference
+on knowledge discovery & data mining. 1059–1068.
+[65] Feng Zhu, Mingjie Zhong, Xinxing Yang, Longfei Li, Lu Yu, Tiehua Zhang, Jun
+Zhou, Chaochao Chen, Fei Wu, Guanfeng Liu, et al .2023. Dcmt: a direct entire-
+space causal multi-task framework for post-click conversion estimation. In2023
+IEEE 39th International Conference on Data Engineering (ICDE). IEEE, 3113–3125.
+[66] Lixin Zou, Changying Hao, Hengyi Cai, Shuaiqiang Wang, Suqi Cheng, Zhicong
+Cheng, Wenwen Ye, Simiu Gu, and Dawei Yin. 2022. Approximated doubly
+robust search relevance estimation. InProceedings of the 31st ACM International
+Conference on Information & Knowledge Management. 3756–3765.

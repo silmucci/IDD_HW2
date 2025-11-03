@@ -1,0 +1,433 @@
+ProfOlaf: Semi-Automated Tool for Systematic Literature Reviews
+
+Nuno Saavedra∗
+INESC-ID & IST, University of Lisbon
+Lisbon, Portugal
+nuno.saavedra@tecnico.ulisboa.ptMartim Afonso∗
+INESC-ID & IST, University of Lisbon
+Lisbon, Portugal
+Politecnico di Torino
+Turin, Italy
+martim.afonso@tecnico.ulisboa.ptBruno Lourenço
+INESC-ID, IST & CINAV, University of
+Lisbon & Portuguese Naval Academy
+Lisbon, Portugal
+bruno.horta.lourenco@tecnico.ulisboa.pt
+Alexandra Mendes
+INESC TEC, Faculty of Engineering,
+University of Porto
+Porto, Portugal
+alexandra@archimendes.comJoão F. Ferreira
+INESC-ID & Faculty of Engineering,
+University of Porto
+Porto, Portugal
+joao@joaoff.com
+Abstract
+Systematic reviews and mapping studies are critical for synthesiz-
+ing research, identifying gaps, and guiding future work, but they
+are often labor-intensive and time-consuming. Existing tools pro-
+vide partial support for specific steps, leaving much of the process
+manual and error-prone. We present ProfOlaf, a semi-automated
+tool designed to streamline systematic reviews while maintaining
+methodological rigor. ProfOlaf supports iterative snowballing for
+article collection with human-in-the-loop filtering and uses large
+language models to assist in analyzing articles, extracting key topics,
+and answering queries about the content of papers. By combining
+automation with guided manual effort, ProfOlaf enhances the ef-
+ficiency, quality, and reproducibility of systematic reviews across
+research fields. A video describing and demonstrating ProfOlaf is
+available at: https://youtu.be/4noUXfcmxsE
+CCS Concepts
+•Information systems →Information retrieval;Data man-
+agement systems;•Computing methodologies →Information
+extraction.
+Keywords
+Systematic Literature Reviews, Automation, LLM
+ACM Reference Format:
+Nuno Saavedra, Martim Afonso, Bruno Lourenço, Alexandra Mendes, and João
+F. Ferreira. 2018. ProfOlaf: Semi-Automated Tool for Systematic Literature
+Reviews. InProceedings of Make sure to enter the correct conference title from
+your rights confirmation email (Conference acronym ’XX).ACM, New York,
+NY, USA, 4 pages. https://doi.org/XXXXXXX.XXXXXXX
+∗Both authors contributed equally to this research.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+Conference acronym ’XX, Woodstock, NY
+©2018 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+ACM ISBN 978-1-4503-XXXX-X/2018/06
+https://doi.org/XXXXXXX.XXXXXXX1 Introduction
+Systematic literature reviews and mapping studies play an essential
+role across research fields, as they organize and synthesize existing
+knowledge, providing a structured overview that highlights estab-
+lished findings, identifies gaps, and indicates promising directions
+for future research. Unlike other forms of literature reviews, sys-
+tematic reviews hold particular scientific value because they follow
+a transparent, well-defined, and unbiased methodology [4].
+Despite their value, conducting systematic reviews is labor-
+intensive and time-consuming [ 16,18]. The process typically re-
+quires conducting broad and comprehensive searches in multiple
+academic databases, followed by careful filtering of large volumes
+of articles against strict inclusion and exclusion criteria. After the
+collection is complete, the reviewers must also inspect and analyze
+the selected studies in depth, identify recurring research topics, and
+formulate answers to predefined research questions. Each of these
+steps demands sustained effort and precision.
+Several methods and tools have been proposed to automate or
+support various steps of the systematic review process [ 5,16]. Ex-
+isting solutions, such as reference managers or search engines, offer
+only partial assistance, leaving key tasks manual, time-consuming,
+and error-prone, reducing efficiency and reproducibility [ 9]. More
+advanced approaches, such as AI-based tools, have shown promis-
+ing results [ 5], but remain fragmented. Although these tools exist
+for individual steps of the process, no solution provides comprehen-
+sive support at all stages. Furthermore, achieving a sensible balance
+between manual effort and tool assistance is essential to ensure
+that precision is not compromised in the pursuit of reducing effort.
+In response to these requirements, we propose ProfOlaf, a semi-
+automated tool designed to support and streamline the review pro-
+cess. ProfOlaf implements a structured methodology that adheres
+to established guidelines for systematic reviews. The methodology
+was designed with the goal of reducing human effort to the greatest
+extent possible. For the collection phase, ProfOlaf uses an iterative
+snowballing process to collect relevant articles, with each iteration
+involving human filtering supported by our tool. In the analysis
+phase, ProfOlaf integrates large language models (LLMs) to ease
+the analysis of the collected articles, enabling users to extract key
+topics from each article and query the model regarding its contents.arXiv:2510.26750v1  [cs.IR]  30 Oct 2025
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY Saavedra et al.
+Set of Articles
+Snowballing
+Search PhaseGet Bibliographic
+Information
+Get venues
+rankings
+Screening PhaseCheck metadata
+language, venue
+ranking, available, year
+...Two or more
+human raters
+...
+Screening
+by Title
+...
+Solve
+Disagreements
+Solve
+Disagreements...
+Screening
+by Full Paper
+...
+(optional)New papers
+found
+Select Initial
+Set of ArticlesNo new
+papers
+found Final Set of Articles
+TopicGPT
+TopicsHardwareTopics?
+Programming Languages?
+AnswersTasksLLM
+Summarize the
+following article
+in a concise way
+Data Extraction Phase
+Fully Automated
+Semi-Automated
+Manual with tool support
+Inspect
+Sample
+Remove duplicates
+MLPython
+Programming Languages
+C++
+Figure 1: Overview of the ProfOlaf methodology. Thesearch phasebegins with an initial set of articles. Snowballing is applied,
+bibliographic information is retrieved, and venues may be optionally ranked. In thescreening phase, article metadata is checked.
+Two or more human raters screen the articles by title and by full paper, with disagreements resolved collaboratively. This cycle
+continues until no new articles are identified. Duplicates are removed to form the final set of articles. In thedata extraction,
+TopicGPT categorizes content into research topics, and LLM-based question answering is employed to extract structured
+insights. Manual inspection complements this step, ensuring a consolidated and reliable final set of extracted data.
+ProfOlaf can assist researchers in conducting systematic reviews,
+thereby enhancing both the quality and the volume of such studies.
+ProfOlaf is open source and available at https://github.com/sr-lab/
+ProfOlaf, along with the experiments described in our evaluation.
+2 ProfOlaf Overview
+ProfOlaf is a Python tool with a structured and repeatable method-
+ology for conducting systematic reviews, illustrated in Figure 1.
+The tool follows a methodology inspired by the guidelines pro-
+posed by Wohlin [ 17]. The subsequent sections provide a detailed
+explanation of each step of the pipeline.
+2.1 Initial Setup
+To setup ProfOlaf the user starts by defining a file containing an
+initial set of article titles. These articles are previously selected
+by the user and can be obtained through, for instance, a previous
+literature review on the topic being handled. The tool generates a
+database that stores all the metadata of the articles as well as the
+intermediate states of each article during the search.
+2.2 Snowballing
+We chose snowballing as our search method, as prior studies show
+it performs as well as or better than database searches [3, 8].
+After populating the database with the initial set of articles,
+ProfOlaf retrieves either the citations (forward snowballing), the
+references (backward snowballing), or both, for each article. The
+tool then compiles the bibliographic information for all the articles.
+Currently, ProfOlaf obtains article data from Google Scholar [ 6],
+Semantic Scholar [ 15], and DBLP [ 14]. However, the tool has been
+designed to ease the integration of additional search sources.2.3 Metadata Screening
+Subsequently, ProfOlaf filters the retrieved articles using the meta-
+data collected in the preceding step. Filtering criteria include venue
+ranking, publication year, and language, all of which are optional.
+Kitchenham et al. have recommended such practical criteria to
+refine the selection of articles [10].
+When the venue-ranking filter is applied, the user must first
+execute the step that assigns a ranking to all the venues present
+in the collected articles. To help the user with this manual task,
+ProfOlaf first uses cosine similarity to find venues previously ranked
+that are similar to the one being classified. Then, the tool searches
+for the venue in venue ranking databases and presents the top
+results for each database. For each result, ProfOlaf outputs the title
+of the venue, its registered ranking, and the cosine similarity score
+of the search. Currently, ProfOlaf searches both in the Scimago
+webpage and in a local CORE ranking table, but this functionality
+is easily extendable to other venue ranking databases.
+2.4 Manual Screening
+ProfOlaf adopts the approach outlined by Wohlin [ 17], which rec-
+ommends screening articles progressively: first the title, then the
+abstract, and finally the full text.
+As such, in this phase, the user is prompted to further refine
+the results, starting with removing irrelevant articles by title and
+then by the full content of the article. For this, ProfOlaf presents,
+for each article, its title as well as aurlwhere the user can access
+it. After each step, the tool can be used to identify and display
+discrepancies between the user and other reviewers’ assessments.
+The reviewers must then discuss these disagreements and reach a
+consensus. The result of this discussion can then be inserted into
+ProfOlaf: Semi-Automated Tool for Systematic Literature Reviews Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+the tool. With manual screening completed, the resulting set of
+articles is used as input to the snowballing phase (Section 2.2) to
+start a new iteration. If a given iteration does not produce new
+results, ProfOlaf consolidates the findings from all iterations into
+a single file. As a final precaution, the tool looks for articles with
+similar titles and checks with the user if they are in fact the same
+article under a different name. With this final check completed, the
+user obtains the final set of articles.
+2.5 Topic Modeling and Task Assistant
+After the collection process is completed, the user can use ProfOlaf
+to ease the manual process of article analysis through the use of
+LLMs. For this, our tool provides functionality for downloading all
+selected articles. Then the content of the PDFs is parsed and can
+be provided to two analysis modules: topic modeling and our task
+assistant. The extracted information from both modules should be
+manually verified by users, either in its entirety or by sampling.
+The topic modeling module uses TopicGPT [ 12] to gather differ-
+ent topics from the collection and cluster them according to those
+topics. TopicGPT is a prompt-based framework that uses LLMs
+to generate interpretable topics with natural language labels and
+descriptions. It enables users to group papers for deeper analy-
+sis, offering greater transparency and verifiability than traditional
+bag-of-words approaches. This functionality can also be useful for
+addressing specific research questions with closed-form answers,
+such as“Which programming language is being considered?”.
+The task assistant module enables users to submit an article to
+a public-access LLM and request tasks such as key information
+extraction or concise, query-tailored summaries.
+3 Evaluation
+To evaluate ProfOlaf, we performed a small illustrative systematic
+literature review. We used the work of Ramos et al. [ 13] as our
+single seed article. We selected this paper because it won the Best
+Paper Award at the LLM4Code 2025 and because we are familiar
+with the topic of the paper.
+3.1 Search and Screening Phase
+The screening phase was carried out over seven iterations by two
+human raters, corresponding to the second and third authors. The
+following inclusion criteria were applied: (1) related to Machine
+Learning for Code; (2) written in English; (3) publicly available; and
+(4) published in a venue ranked by CORE or Scimago.
+The results of all iterations are summarized in Table 1. We cal-
+culate the efficiency measure for systematic literature reviews, a
+metric used by Wohlin [ 17] in their work to evaluate the amount of
+noise in the search. This metric is the number of included articles
+relative to the total number of candidate articles examined. The
+efficiency by iteration and the final efficiency are both represented
+in Table 1. As shown in Table 1, early iterations yielded a relatively
+higher proportion of relevant studies, while later iterations were
+characterized by a substantial increase in rejections. This pattern
+illustrates the phenomenon of diminishing returns in the search
+expansion process.Table 1: Paper retrieval and screening results across iterations
+Iteration RetrievedRejected
+(Metadata + Screening) Approved Efficiency
+1 19 13 + 1 5 0.26
+2 100 63 + 7 30 0.43
+3 227 158 + 47 22 0.09
+4 111 84 + 9 18 0.16
+5 100 72 + 3 25 0.25
+6 433 414 + 9 10 0.02
+7 19 19 + 0 0 0
+Total 1009 823 + 76 110 0.11
+After screening, we obtained 111 articles, including the seed
+article by Ramos et al. [ 13]. The final set of articles consisted of 108
+articles, after the removal of three duplicates.
+3.2 Data Extraction Phase
+We selected two tasks for the Topic Modeling module: identifying
+the programming languages explored and the topics studied; and
+one task for the Task Assistant module, article summarization. We
+perform this evaluation withgpt-5-nano.
+3.2.1 Topics Studied.Our topic modeling module identified 17 top-
+ics. To evaluate the capability of TopicGPT in assigning correct
+topics to articles, we constructed a ground truth by manually la-
+beling each article. The first and second authors received the list
+of topics generated and were asked to assign topics to each article.
+Subsequently, the raters met to resolve disagreements and establish
+the final list of topic assignments. The process took in total 6.45
+hours. The ground truth was compared with the TopicGPT results,
+which achieved a precision of 0.547 and a recall of 0.650.
+The raters noted several observations. The topics were generally
+accurate, as it was possible to assign at least one topic to the majority
+of articles. However, some important topics were absent from the
+generated set, includingBenchmark for Code Generation/Repair,
+Education, andCode Translation. When comparing the module’s
+assignments with the manual labels, we observed that the model
+frequently assigned bothCode GenerationandAutomated Program
+Repair, whereas the raters selected onlyAutomated Program Repair,
+treating it as a more specific instance of the broader category. Such
+cases likely contributed to the observed low precision score.
+3.2.2 Programming Languages Used.For this task, the topic model-
+ing module identified 40 programming languages. As in the previous
+task, assignments were performed both automatically by the tool
+and manually by the same raters. However, in this case, the raters
+were not restricted to the module’s generated set of answers. The
+entire process required 3.88 hours. The module achieved an average
+precision of 0.590 and an average recall of 0.710.
+Manual inspection of the assignments revealed that the model
+frequently tagged Python as one of the languages. This likely stems
+from the fact that many papers employ Python for data processing
+or model training, leading to its assignment even when it was
+not the language under exploration. Additionally, the model often
+assigned more languages than were actually relevant, suggesting a
+tendency toward over-assignment and a degree of hallucination.
+3.2.3 Task Assistant.For the Task Assistant task, we asked the
+model for a summary of each paper. The summaries were evaluated
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY Saavedra et al.
+Table 2: Evaluation of summary quality across 4 different
+criteria.
+Criterion Mean Std Criterion Mean Std
+Faithfulness 4.907 0.242 Structure 4.558 0.454
+Salience 4.333 0.367 Conciseness 4.648 0.334
+by two raters according to four parameters on a Likert scale from 1
+to 5. The results of the evaluation are presented in Table 2.
+Both raters generally agreed the summaries were accurate and
+free from hallucinations.Coveragewas the lowest-scoring criterion,
+as some summaries did not fully capture the most important details;
+however, this limitation was minor (average score of 4.333). The
+other criteria received high scores, suggesting that the summaries
+were typically well-structured, easy to follow, and conveyed key
+points with minimal redundancy. Coherence/Structure had the
+highest standard deviation, indicating that the model’s ability to
+organize ideas varied the most across summaries.
+3.2.4 Discussion.The results indicate that while LLMs can deliver
+satisfactory outcomes for tasks such as summarization, more ad-
+vanced models and methodologies are needed before they can be
+fully trusted for tasks such as topic modeling. For such cases, we
+argue that LLMs are best employed in a human-in-the-loop setting,
+either as assistants that facilitate manual work or as tools subject
+to human critique. For example, instead of manually identifying
+topics from scratch, a human could validate and refine the topic list
+generated by TopicGPT, as well as the assignments it produces. This
+approach substantially reduces effort while maintaining reliability.
+4 Related work
+Bacinger et al. present a semi-automated system supporting the
+search and screening phases of literature reviews. It automates the
+retrieval of articles from multiple sources, helps define search terms,
+and uses machine learning models to identify relevant papers. It
+also supports curating and exporting the final set of papers [ 2].
+While Bacinger et al.’s tool uses database searches, ProfOlaf uses
+snowballing, as prior studies show it performs as well as or better
+than database searches [ 3,8]. Moreover, Bacinger et al.’s system
+does not support data extraction from articles.
+Agarwal et al. introduce LitLLM, an LLM-based toolkit for the
+generation of scientific literature reviews. It automatically gener-
+ates search keywords from user-provided abstracts, retrieves and
+re-ranks relevant papers, and produces related work text grounded
+in these papers through Retrieval-Augmented Generation [ 1]. De-
+spite its text generation power, LitLLM lacks manual curation or
+snowballing, unlike ProfOlaf’s human-in-the-loop workflow.
+He et al. propose PaSa, an LLM-based agent for academic paper
+search. PaSa automates query generation, retrieves and expands
+results through citation networks, and uses a selector agent to
+evaluate relevance, thereby enabling comprehensive and accurate
+literature retrieval [ 7]. The authors’ work emphasizes automated
+retrieval and screening but does not allow manual curation, whereas
+ProfOlaf balances automation with the researcher’s control.
+Li et al. present ChatCite, a tool that automates literature sum-
+marization by extracting key elements from papers, generating
+comparative summaries through an iterative reflective process,and evaluating the results with a novel automatic metric called G-
+score [ 11]. Unlike ProfOlaf, which covers the review cycle from the
+search to the data extraction phase, ChatCite focuses exclusively
+on summary generation and is therefore complementary.
+5 Conclusion
+ProfOlaf addresses key challenges in systematic reviews by com-
+bining iterative snowballing with LLM-assisted analysis, striking a
+balance between automation and human oversight. By improving
+efficiency, rigor, and reproducibility, it enables researchers to con-
+duct higher-quality reviews with reduced effort. Given the rapidly
+growing volume of research in software engineering, ProfOlaf can
+be valuable in helping SE researchers keep pace with the field.
+References
+[1]Shubham Agarwal, Gaurav Sahu, Abhay Puri, Issam H Laradji, Krishnamurthy DJ
+Dvijotham, Jason Stanley, Laurent Charlin, and Christopher Pal. 2024. Litllm: A
+toolkit for scientific literature review.arXiv preprint arXiv:2402.01788(2024).
+[2]Filip Bacinger, Ivica Boticki, and Danijel Mlinaric. 2022. System for semi-
+automated literature review based on machine learning.Electronics11, 24 (2022),
+4124.
+[3]Deepika Badampudi, Claes Wohlin, and Kai Petersen. 2015. Experiences from
+using snowballing and database searches in systematic literature studies. In
+Proceedings of the 19th international conference on evaluation and assessment in
+software engineering. 1–10.
+[4]Pearl Brereton, Barbara A Kitchenham, David Budgen, Mark Turner, and Mo-
+hamed Khalil. 2007. Lessons from applying the systematic literature review
+process within the software engineering domain.Journal of systems and software
+80, 4 (2007), 571–583.
+[5]Nicholas Fabiano, Arnav Gupta, Nishaant Bhambra, Brandon Luu, Stanley Wong,
+Muhammad Maaz, Jess G Fiedorowicz, Andrew L Smith, and Marco Solmi. 2024.
+How to optimize the systematic review process using AI tools.JCPP advances4,
+2 (2024), e12234.
+[6]Google. 2025. Google Scholar. https://scholar.google.com Accessed 26-09-2025.
+[7]Yichen He, Guanhua Huang, Peiyuan Feng, Yuan Lin, Yuchen Zhang, Hang Li,
+et al.2025. Pasa: An llm agent for comprehensive academic paper search.arXiv
+preprint arXiv:2501.10120(2025).
+[8]Samireh Jalali and Claes Wohlin. 2012. Systematic literature studies: database
+searches vs. backward snowballing. InProceedings of the ACM-IEEE international
+symposium on Empirical software engineering and measurement. 29–38.
+[9]Staffs Keele et al .2007.Guidelines for performing systematic literature reviews in
+software engineering. Technical Report. Technical report, ver. 2.3 ebse technical
+report. ebse.
+[10] Barbara Kitchenham, Stuart Charters, et al .2007. Guidelines for performing
+systematic literature reviews in software engineering. (2007).
+[11] Yutong Li, Lu Chen, Aiwei Liu, Kai Yu, and Lijie Wen. 2025. ChatCite: LLM
+Agent with Human Workflow Guidance for Comparative Literature Summary.
+InProceedings of the 31st International Conference on Computational Linguistics.
+3613–3630.
+[12] Chau Minh Pham, Alexander Hoyle, Simeng Sun, Philip Resnik, and Mohit Iyyer.
+2024. Topicgpt: A prompt-based topic modeling framework. DOI: 10.48550.arXiv
+preprint arXiv.2311.01449(2024).
+[13] Daniel Ramos, Claudia Mamede, Kush Jain, Paulo Canelas, Catarina Gamboa, and
+Claire Le Goues. [n. d.]. Are large language models memorizing bug benchmarks?,
+2024.URL https://arxiv. org/abs/2411.133236 ([n. d.]).
+[14] Schloss Dagstuhl - Leibniz Center for Informatics. 2025. DBLP. https://dblp.org
+Accessed 26-09-2025.
+[15] Semantic Scholar. 2025. Semantic Scholar. https://www.semanticscholar.org
+Accessed 26-09-2025.
+[16] Raymon Van Dinter, Bedir Tekinerdogan, and Cagatay Catal. 2021. Automation
+of systematic literature reviews: A systematic literature review.Information and
+software technology136 (2021), 106589.
+[17] Claes Wohlin. 2014. Guidelines for snowballing in systematic literature studies
+and a replication in software engineering. InProceedings of the 18th international
+conference on evaluation and assessment in software engineering. 1–10.
+[18] He Zhang and Muhammad Ali Babar. 2013. Systematic reviews in software
+engineering: An empirical investigation.Information and software technology55,
+7 (2013), 1341–1354.
+Received 20 February 2007; revised 12 March 2009; accepted 5 June 2009

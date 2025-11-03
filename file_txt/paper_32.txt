@@ -1,0 +1,673 @@
+From Time and Place to Preference: LLM-Driven Geo-Temporal Context in Recommendations
+
+From Time and Place to Preference:
+LLM-Driven Geo-Temporal*Context in Recommendations
+Yejin Kim1,2, Shaghayegh Agah1, Neeraj Sharma1, Mayur Nankani1,
+Feifei Peng1, Maria Peifer1, Sardar Hamidian1†H. Howie Huang2†
+1Comcast Technology AI
+2GraphLab, George Washington University
+{yejin kim, shaghayegh agah, neeraj sharma, mayur nankani, feifei peng, maria peifer, sardar hamidian}@comcast.com
+{yeijnjenny, howie}@gwu.edu
+Abstract
+Most recommender systems treat timestamps as numeric or
+cyclical values, overlooking real-world context such as hol-
+idays, events, and seasonal patterns. We propose a scalable
+framework that uses large language models (LLMs) to gen-
+erate geo-temporal embeddings from only a timestamp and
+coarse location, capturing holidays, seasonal trends, and lo-
+cal/global events. We then introduce a geo-temporal embed-
+ding informativeness test as a lightweight diagnostic, demon-
+strating on MovieLens, LastFM, and a production dataset that
+these embeddings provide predictive signal consistent with
+the outcomes of full model integrations. Geo-temporal em-
+beddings are incorporated into sequential models through (1)
+direct feature fusion with metadata embeddings or (2) an aux-
+iliary loss that enforces semantic and geo-temporal align-
+ment. Our findings highlight the need for adaptive or hy-
+brid recommendation strategies, and we release a context-
+enriched MovieLens dataset to support future research.
+Introduction
+While many recommender systems incorporate temporal
+signals to capture periodic and seasonal patterns, they often
+fail to encompass the full spectrum of geo-temporal factors
+that shape user preferences. In practice, user intent is influ-
+enced not only by time but also by cultural, seasonal, and
+regional variations. For example, a user’s preferences dur-
+ing winter in New York may differ substantially from those
+in Florida, particularly for multinational platforms that must
+serve a geographically and culturally diverse user base. Tra-
+ditional models attempt to account for such variations by
+leveraging extensive user histories and manually engineered
+temporal features; however, these approaches face signifi-
+cant scalability challenges in real-world large-scale recom-
+mendation systems (Bogina et al. 2022).
+Moreover, the impact of contextual information varies
+across domains. In e-commerce, fashion cycles and seasonal
+trends are dominant (Ludewig et al. 2018), while in stream-
+ing platforms, entertainment events such as the Oscars or the
+Grammys can reshape consumption patterns (Adomavicius
+*Geo-temporal combines temporal and geographic signals.
+Copyright © 2026, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+† Corresponding authors.
+Figure 1: From timestamp and location to LLM-generated
+geo-temporal context for sequential recommendation.
+and Tuzhilin 2011). However, existing context-aware rec-
+ommenders typically rely on static, domain-specific calen-
+dars or curated event lists (Mateos and Bellogn 2024), which
+limits responsiveness to real-time changes. Dynamic context
+modeling has emerged as a solution, but current methods de-
+mand substantial engineering effort, rely on curated exter-
+nal data, and often lack cross-domain generality (Chen et al.
+2025).
+Large language models (LLMs) now offer the capabil-
+ity to generate semantically rich, real-time contextual sig-
+nals directly from coarse inputs such as timestamps and ge-
+ographic locations. This opens the door to scalable, domain-
+agnostic personalization without manual feature engineer-
+ing. Motivated by this, we propose an LLM-driven geo-
+temporal (GT) context enrichment framework that synthe-
+sizes cultural, seasonal, and event-based information into
+geo-temporal embeddings for recommendation. Figure 1 il-
+lustrates the process, from absolute timestamps and coarse
+location inputs to LLM-generated geo-temporal context fea-
+tures that are integrated into sequential recommendation
+models.
+While LLM-generated context raises challenges such as
+hallucinations, outdated knowledge, and limited traceability,
+we demonstrate that these embeddings can deliver measur-
+able performance gains in realistic recommendation scenar-
+ios. Our contributions are summarized as follows:
+• We propose a novel LLM-driven framework for dynamic
+temporal and location context enrichment in recommen-
+dation systems, extracting rich semantic signals fromarXiv:2510.24430v1  [cs.IR]  28 Oct 2025
+only a UTC timestamp and a coarse location without re-
+lying on static calendars or manual feature engineering.
+• We introduce a geo-temporal embedding informative-
+ness test as a lightweight diagnostic, and validate across
+MovieLens (Harper and Konstan 2015), LastFM (Bertin-
+Mahieux et al. 2011), and the production dataset that
+aligns with the corresponding evaluation results.
+• We evaluate our proposed frameworks on two datasets,
+MovieLens 1M and a large-scale production dataset
+by integrating the generated geo-temporal context into
+multiple sequential recommendation variants, showing
+dataset- and behavior-dependent gains.
+• We release context-enriched versions of MovieLens 1M
+with detailed geotemporal annotations to support re-
+search on adaptive, time- and event-aware personaliza-
+tion.
+Related Work
+Context-aware recommender systems integrate additional
+contextual information such as time, location, or social set-
+ting to better personalize recommendations. Temporal con-
+text is among the most important dimensions, as user pref-
+erences fluctuate based on day, season, or ongoing events.
+Studies have shown that incorporating time-based con-
+text improves both trust and engagement (Panniello, Gor-
+goglione, and Tuzhilin 2016; Gorgoglione and Panniello
+2019).
+Two primary approaches to encode time: (1) explicit
+feature-based modeling, where temporal information is in-
+corporated as static metadata (e.g., hour of day, holiday
+flag), and (2) implicit sequence modeling, which captures
+temporal dynamics through evolving user-item sequences
+(Chiroma and Herawan 2017; Raza and Ding 2019). Sur-
+veys such as (Bogina et al. 2022) further emphasize that
+understanding seasonality, temporal drift, and context evo-
+lution is critical to performance across domains. Domain-
+specific studies confirm its value in e-commerce benefits
+from modeling seasonal promotions (Ma et al. 2019), food
+recommenders from daily and weekly cycles (Trattner and
+Elsweiler 2019), and news platforms from global events
+(Gulla et al. 2016). However, most rely on handcrafted or
+rigid rules, limiting scalability.
+Recent works in ubiquitous and mobile computing have
+enriched recommendation pipelines with dynamic context
+such as weather, user mobility, and physical environment.
+Yoon and Choi (Yoon and Choi 2023) showed how tourism
+recommenders benefit from incorporating live environmen-
+tal signals (e.g., temperature or precipitation). Despite ad-
+vances, few works model high-level semantic temporal
+knowledge such as Christmas, World Cup, or Back to School
+season as first-class contextual entities, largely due to lim-
+ited knowledge integration in traditional recommender sys-
+tems.
+LLMs for Contextual EnrichmentEfforts to bridge this
+gap increasingly rely on external knowledge. Early work
+integrated structured databases (e.g., Wikidata) via knowl-
+edge graphs, enriching item and user representations withsemantic attributes (Wang et al. 2018), improving explain-
+ability and cold-start handling. Unlike curated knowledge
+bases, LLMs expand this by encoding vast world knowledge
+and generating dynamic context. Eghbalzadeh et al. (Egh-
+balzadeh et al. 2024) use a multimodal LLM to detect and
+calibrate seasonal trends in advertisements. Xu et al. (Xu
+et al. 2025) show that LLMs can be used to refine or reinter-
+pret user intent in recommendation tasks. LLMs have also
+been explored for augmenting interaction data (Wei et al.
+2024) or generating item descriptions for improved person-
+alization.
+Our work leverages this trend to extract semantically
+rich geo-temporal context from timestamps and coarse lo-
+cation data. Instead of hard-coded holiday lists or domain-
+specific heuristics, we prompt an LLM to identify real-world
+events, cultural phenomena, or behavioral trends that coin-
+cide with user activity. This enables dynamic, scalable, and
+domain-agnostic enrichment of recommender models with
+real-world awareness, aligning with the broader push toward
+foundation model-augmented personalization systems.
+Approach
+We propose a large language model (LLM) drivenGeo-
+Temporal Context Extraction Modulethat transforms a UTC
+timestamp and user location into a semantically rich set of
+contextual attributes. We define context as the set of geo-
+temporally relevant signals such as holidays, events, or cul-
+tural phenomena, that may influence user preferences at the
+time of interaction.
+Given a timestamp and a geographic location (e.g., city,
+state, or country), we construct a structured prompt to query
+different LLMs (Meta AI 2024). The prompt asks the model
+to describe the geo-temporal context relevant to that spe-
+cific time and place, including seasonality, day type (week-
+day/weekend/holiday), ongoing cultural or regional events,
+global news, and behavioral trends. The LLM is instructed
+to return its response in a structured JSON format, which
+we parse into machine readable features suitable for down-
+stream processing.
+We incorporate these geo-temporal context features into
+a sequential recommendation model, alongside collabora-
+tive signals and item metadata features. We explore multi-
+ple integration strategies for fusing context into the ranking
+pipeline. Through these experiments, we aim to identify ef-
+fective patterns for leveraging LLM-generated geo-temporal
+context in recommendation tasks.
+Prompt Design for Geo-Temporal Context
+To extract rich geo-temporal context from LLMs, we de-
+sign a structured prompt template grounded in the interac-
+tion timestamp and user location. The prompt instructs the
+LLM to return:
+• A list of relevant real-world events that occurred
+shortly before the specified timestamp in the given re-
+gion, including holidays, cultural celebrations, political
+events, sports tournaments, entertainment releases, fash-
+ion trends, notable figures, and major social events.
+(a) (b) (c) (d)
+Figure 2: (a) Baseline model (SASRec) (b) Auxiliary loss contrasting semantically and geo-temporally similarvs.dissimilar
+items (c) Replaced item Id embeddings with metadata embeddings as input, and added geo-temporal embeddings to metadata
+embeddings at the loss stage (d) Concatenated item Id and metadata embeddings as input, and added geo-temporal embeddings
+at the loss stage
+• A concise natural language summary (2–3 sentences) de-
+scribing the broader geo-temporal context and how it
+might influence user behavior.
+The prompt enforces a structured JSON response with
+two fields:events(an array of event descriptions) and
+summary(a short explanatory text).
+Abstract Version of the Prompt
+You are a time-context assistant for
+recommendation systems.
+A user interacted with content at the following
+time and place:
+- UTC time:{timestamp}
+- Location:{location}
+Please return:
+1. A list of relevant real-world events shortly
+before this time and location.
+2. A short natural language summary explaining
+how these events might influence user interests.
+Format your answer as valid JSON with fields
+events and summary.
+Geo-Temporal Embedding Informativeness Test
+Before integrating geo-temporal embeddings into the full
+recommendation pipeline, we conduct an initial utility test
+to assess whether they encode meaningful predictive signals.
+Lett i∈Rddenote the geo-temporal embedding of item
+igenerated by the LLM from its interaction timestamp and
+location, and leth urepresent the set of items previously in-
+teracted with by useru. For each user, we randomly sample
+one itemi∈h uand use its temporal embeddingt ias the
+user geo-temporal embedding.
+Letm j∈Rddenote the metadata embedding of candi-
+date itemj, wherejranges over the entire set. The useritemscore is computed as the dot product:
+score(u, j) =t⊤
+imj (1)
+Items are ranked in descending order ofscore(u, j)to pro-
+duce recommendations. To evaluate the informativeness of
+geo-temporal embeddings, we measure the hit rateHR@k
+for this ranking and compare it against a random ranking
+baseline:
+HR@k geo−temporal >HR@k random (2)
+If the above condition holds, even by a small margin, we
+conclude that the geo-temporal embeddings contain predic-
+tive information that can enhance recommendation quality.
+This serves as a lightweight validation step before integrat-
+ing geo-temporal embeddings into more complex sequential
+models.
+Model Integration
+We integrated the LLM-generated geo-temporal context
+features into the sequential recommendation model SAS-
+Rec (Kang and McAuley 2018). To represent the context
+information, we encoded the JSON-based descriptions us-
+ing the GTE-large encoder (Li et al. 2023), producing dense
+embeddings that were incorporated into SASRecs input se-
+quence alongside traditional item embeddings. Our goal was
+to evaluate not only the overall impact of geo-temporal con-
+text on recommendation performance, but also to explore
+effective strategies for integrating geo-temporal context fea-
+tures into existing architectures.
+We experimented with multiple integration schemes, fea-
+ture representations, and model configurations to identify
+practical design patterns for incorporating context-aware
+signals into sequential models. Figure 2 illustrates the ar-
+chitectures of our proposed context-enhanced sequential
+recommendation model, which extends a SASRec-style
+Transformer backbone by integrating LLM-generated geo-
+temporal context representations.
+In Figure 2-(a), a SASRec encoder, serving as the base-
+line Transformer backbone, processes item Id embeddings
+through stacked self-attention and feed-forward layers to
+produce collaborative representations for next-item predic-
+tion. Each token corresponds to a learnable item Id em-
+beddingi i∈Rdi, where the users history isH u=
+{i1, i2, . . . , i n−1}. Next-item relevance is scored by dot
+products with positive and negative items:
+s+=h⊤
+n−1in, s−=h⊤
+n−1ij, j /∈H u (3)
+and training is guided by a contrastive loss:
+Lrank =−logσ(s+)−logσ(−s−)(4)
+We consider two complementary strategies for incorporating
+geo-temporal embeddings. One strategy introduces an auxil-
+iary loss that encourages geo-temporal embeddings to align
+with semantic metadata representations (as in Figure 2-(b)).
+The other strategy integrates geo-temporal signals directly
+into the input sequence, either by summing them with meta-
+data embeddings or combining them with Id embeddings (as
+in Figures 2-(c) and (d)).
+Figure 2-(b) shows an auxiliary loss aligning geo-
+temporal embeddings with item metadata embeddings.
+Given a geo-temporal embeddingt n−1from the interaction
+timestamp and a metadata embeddingm n−1 of the same
+item, we treat them as a positive pair. In contrast,t n−1
+andm j, wherej /∈H u1, form negative pairs. To con-
+struct negative samples, the method identifies items that the
+target user has not interacted with. For each interaction, it
+considers a geo-temporal window preceding the interaction
+date and gathers items interacted with by other users dur-
+ing that period. It then filters out any items the target user
+has already seen to avoid false negatives. From the remain-
+ing pool, a fixed number of items are randomly selected as
+negative samplesrepresenting plausible alternatives the user
+could have encountered but did not engage with. The aux-
+iliary objective encourages similarity for positives and dis-
+similarity for negatives:
+Laux=ℓ 
+sim(t n−1, mn−1),1
++ℓ 
+sim(t n−1, mj),0
+,(5)
+wheresim(·)denotes a similarity function andℓ(·)is a gen-
+eral contrastive loss. This auxiliary supervision encourages
+geo-temporal embeddings to capture semantic consistency
+with item content while remaining discriminative against
+unrelated items. Since both geo-temporal and metadata em-
+beddings are precomputed and fixed, the auxiliary objective
+is defined purely at the embedding level. As a result, it is
+model-agnostic and can be seamlessly combined with a wide
+range of sequential encoders beyond SASRec.
+Figure 2-(c) depicts a variant that removes trainable Id
+embeddings and instead relies on metadata representations
+mi, which replace the Id embeddings in the SASRec en-
+coder of Figure 2-(a). Temporal embeddingst iare combined
+with metadata embeddings during the scoring stage when
+constructing positive and negative pairs for the contrastive
+loss. Next-item relevance is computed as the dot product be-
+tween the user representation,h n−1, and positive/negativegeo-temporal metadata embeddings:
+hn−1=G(F([m 1, . . . , m n−1])), x i=F(m i+ti),(6)
+s+=h⊤
+n−1xn, s−=h⊤
+n−1xj, j /∈H u (7)
+Equations (7) are applied to Equation (4) to compute the
+ranking loss. Since bothm iandt iare fixed, the parameter
+count excludes the Id table and any additional projection lay-
+ers, leaving only the Transformer backbone trainable. This
+makes (c) highly parameter- and compute-efficient, with
+negligible per-token overhead before the Transformer.
+At inference, we simply calculatex j=F(m j+tj)(with
+context) orx j=F(m j)(without context), and the rele-
+vance score iss j=h⊤
+n−1xj.
+Figure 2-(d) instead retains trainable Id embeddings and
+concatenates them with metadata embeddings, which are
+first projected into the model space; geo-temporal signals
+are then incorporated only at the ranking loss stage.
+hn−1=G([z 1, ..., z n−1]), z i=F 1([ii∥m i])(8)
+xi=F 2(ti) +h i (9)
+Equations (8) and (9) are applied to Equations (7) and (4)
+to compute the ranking loss. In this design, a trainable Id
+embeddingi i, initialized from a lookup table, is concate-
+nated with the frozen metadata embeddingm iand projected
+into the model space. Geo-temporal embeddingst i(frozen
+from a pre-trained encoder) are then added only at the rank-
+ing loss stage. This preserves collaborative signals through
+iiwhile allowing metadata and geo-temporal features to act
+as contextual modulators. By deferring geo-temporal fusion,
+tifunctions as a contextual bias rather than being entangled
+with Id and metadata at the input stage, which is beneficial
+when geo-temporal factors modulate but do not override co-
+consumption patterns uniquely captured by Id embeddings.
+At inference, each candidate is scored asx j=hj+F 2(tj)
+(with context) orx j=hj(without context), with the rele-
+vance scores j=h⊤
+n−1xj.
+Experiments
+Dataset and Contextual Enrichment
+We selected the MovieLens 1M and LastFM 1K datasets
+due to their inclusion of both user interaction timestamps
+and location information, which are essential for generat-
+ing location and time-specific context. It was necessary to
+have a dataset collected in a wide time window to capture
+seasonality in different contextualized scenarios. We also
+utilized a recent large-scale production dataset containing
+real user interaction logs to validate the practical utility of
+our approach in real-world systems. We applied a standard
+prompt-engineering pipeline to enrich these datasets, em-
+ploying large language models (LLMs) to generate struc-
+tured JSON outputs containing real-world events and natural
+language summaries of geo-temporal context.
+For evaluation, we constructed two types of test sets: a
+general usersetting, which reflects typical historical inter-
+actions and includes behaviors such as binge watching, and
+anexplorer usersetting, where users interacted only with
+entirely new items not seen in the previous six months. This
+split allows us to examine both standard recommendation
+quality and the models ability to generalize to unseen items.
+In the production dataset, we had the option to retain or re-
+move repeated series episodes. For the general user setup,
+we kept them based on total watched duration, while for
+the explorer user setup, we removed such duplicates dur-
+ing training.Note that MovieLens timestamps reflect rating
+events, not actual watch times, adding noise from rating de-
+lays. Each movie appears only once per user, so all users are
+effectively explorer users.
+Evaluating Geo-Temporal Embedding
+To assess the predictive power of LLM-generated contex-
+tual features independently of user history, we conducted a
+non-parametric end-to-end (E2E) experiment. For randomly
+selected target days from the dataset, we embedded the con-
+textual signal and computed cosine similarity with item rep-
+resentations derived from metadata, encoded using GTE-
+large (Li et al. 2023). Compared to a random baseline, con-
+textual signals alone yielded meaningful performance, as
+measured by hit rate (HR), demonstrating their standalone
+predictive utility.
+Table 1: Percentage of improvements (%) of HR@kon three
+datasets as(HR E2E−HR Random )/HR Random×100
+Dataset @10 @20 @50 @100
+MovieLens +78.9 +20.7 +41.1 +14.2
+Large-scale Production +16.3 +16.1 +21.9 +25.4
+LastFM +0.79 +0.39 -0.30 -0.61
+While MovieLens and the large-scale production dataset
+show clear performance gains, LastFM results are small
+and inconsistent in Table 1, indicating little geo-temporal
+signal for this domain. Consistently, full model integration
+on LastFM also yielded no meaningful improvements. We
+therefore report LastFM only as a preliminary validation of
+our diagnostic test, excluding it from the main results.
+Evaluation Metrics
+We conducted a series of experiments to evaluate the per-
+formance of GT-enhanced recommendation model. Standard
+top-kranking metrics, hit rate (HR) and normalized dis-
+counted cumulative gain (NDCG), were used to assess the
+quality of the recommendation. For thegeneral usertest set,
+we additionally report item coverage to capture the diversity
+of recommended items. In contrast, for theexplorer userset-
+ting, where users interact only with entirely new items, we
+focus on HR and NDCG, since the primary concern is rank-
+ing quality among unseen items rather than coverage.
+Model Variants and Terminology
+We consider several model variants in our evaluation, M de-
+notes the metadata-only baseline, and Id+M augments this
+with item Ids. Id+M+GT extends Id+M with geo-temporal
+features applied at both training and inference, while
+Id+M+GT train uses geo-temporal features only during
+training. Similarly, M+GT incorporates geo-temporal fea-
+tures into the metadata-only setting. In addition, we exam-
+ine extensions with auxiliary objectives, denoted as +Loss-
+[BCE/Cos/Pairwise {rand|sem} ]. These variants correspondto the architectural designs in Figure 2: (a) the metadata-only
+baseline, which yields M and Id+M depending on the input;
+(b) the auxiliary-loss extension (+Loss-*); (c) the metadata
+with geo-temporal features (M+GT); and (d) the full geo-
+temporal model (Id+M+GT). In Pairwise sem, we use a cus-
+tomized pairwise loss based on Margin Ranking Loss and
+semantic negative samples. Negatives are sampled randomly
+from the pool of least similar items to the GT feature. We
+perform several ablation studies on the selection of negative
+samples for each GT embedding. Our studies demonstrated
+that restricting to the most dissimilar item from the entire
+space tends to have a lower performance compared with ran-
+domly selecting from the pool of dissimilar items. The latter
+yields more stable results. This can be due to overfitting of
+the pairwise loss on extremely hard negative samples.
+Main Results
+Forgeneral users, Table 2 shows that M+GT achieves the
+strongest performance. By capturing next-item signals from
+both content information (genres, actors, topics) and geo-
+temporal effects (weekends, holidays, seasons), M+GT pro-
+vides a lightweight and robust encoder. Since metadata and
+geo-temporal embeddings are fused while frozen, the model
+avoids reliance on collaborative memorization. This design
+also improves parameter efficiency, reducing model size and
+acting as a regularizer. As a result, M+GT yields better av-
+erage accuracy across broad user groups by lowering vari-
+ance and mitigating overfitting, making it particularly effec-
+tive when content and geo-temporal signals dominate.
+Forexplorer users, Table 3 shows that Id+M+GT model
+categories deliver superior performance. These users exhibit
+high-entropy, novelty-seeking, or long-tail behavior where
+fine-grained, item-to-item cues (e.g., sequel chains) are es-
+sential. Unlike M+GT, Id+M+GT retains item IDs along
+with metadata and GT features. This provides stronger ex-
+pressiveness and allows the model to capture fine-grained
+item-to-item transitions, leading to clear gains for explorer
+users despite the higher computational cost.
+For inference and production use, we run an offline job
+that generates ground-truth geo-temporal features and em-
+beddings for the following day. Although these are created
+one day in advance and may not fully reflect the latest con-
+text, they leverage the most recent LLM. As the results indi-
+cate, even without up-to-date embeddings at inference time,
+this setup still achieves the second-best model(M+GT train
+in Table 2) in terms of relative improvement four our pro-
+duction dataset.
+Geo-Temporal Context Adaptation
+Geo-temporal embeddings are designed to capture seasonal-
+ity, event-driven viewing patterns, and during training they
+consistently improve performance by providing additional
+contextual signals. The production data set timestamps re-
+flect the time that the user watches the program. However,
+the MovieLens dataset contains timestamps reflecting rating
+events rather than actual watch times, resulting in heteroge-
+neous geo-temporal distributions. This also undermines se-
+mantic negative sampling, since candidate negatives may not
+match the true temporal context of the users. Consequently,
+Model Variation NDCG HR Coverage
+@5 @10 @1 @5 @10 @1 @5 @10
+M 18.02 14.52 29.31 10.46 2.83 16.12 72.15109.02
+Id+M -40.91 -37.21 -52.49 -33.44 -25.31 -50.62 -43.35 -39.16
+Id+M+GT train -18.29 -16.58 -24.61 -14.28 -10.61 -37.31 -35.21 -33.22
+Id+M+GT -2.11 -1.54 -2.50 -1.90 -0.60 1.40 2.69 1.65
+M+GT train 19.31 15.81 28.48 13.00 5.26 19.3367.96 112.54
+M+GT21.44 17.68 32.77 13.90 5.5914.72 60.76 105.39
+Loss-[BCE] 0.64 0.70 2.00 -0.15 0.09 -3.56 -4.35 -5.94
+Loss-[Cos] -1.24 -1.34 -1.01 -1.13 -1.39 -15.78 -20.97 -21.67
+Loss-[Pairwise rand] 1.06 0.94 2.80 0.40 0.22 -16.65 -20.02 -21.34
+Loss-[Pairwise sem] 1.54 1.43 2.44 0.94 0.84 -3.25 -7.52 -8.14
+Table 2: Model performance for general users, production dataset. Percentage improvement (%) over Baseline(SASRec)
+Model Variation MovieLens Dataset Production Dataset
+NDCG@5 NDCG@10 HR@1 HR@5 HR@10 NDCG@5 NDCG@10 HR@1 HR@5 HR@10
+M 24.30 11.27 1250.00 9.75 0.75 -72.39 -75.00 -73.98 -72.13 -76.43
+Id+M 12.91 7.10 375.00 8.40 3.32 -15.95 -14.45 -4.07 -18.64 -15.56
+Id+M+GT train 47.09 29.94 2337.50 21.60 12.646.44 7.80 11.38 5.27 7.89
+Id+M+GT 43.29 24.07 2337.5017.28 6.139.51 9.63 21.956.40 8.01
+M+GT train 23.04 12.04 1375.00 7.78 1.63 -61.35 -61.47 -73.98 -58.19 -59.84
+M+GT 31.65 17.13 1575.00 13.70 4.13 -65.34 -65.37 -82.11 -61.77 -63.04
+Loss-[BCE] 10.13 5.25 50.00 8.40 3.19 -2.15 -2.06 4.88 -2.82 -2.63
+Loss-[Cos] 9.37 7.87 0.00 8.52 7.26 -12.27 -9.17 -19.51 -9.98 -5.61
+Loss-[Pairwise rand] 5.82 4.01 25.00 4.69 3.13 -3.37 -2.75 -3.25 -3.01 -2.52
+Loss-[Pairwise sem] -2.78 -6.79 50.00 -5.80 -9.64 9.20 8.03 17.07 7.536.29
+Table 3: Model performance comparison for explorer users. Percentage improvement (%) over Baseline(SASRec). Bold = best,
+underline = second best per metric within each dataset. Absolute performance for MovieLens is provided in the Appendix.
+objectives based on binary cross-entropy (BCE) or pairwise
+losses, that show promising signal in the production dataset
+results, suffer from misaligned supervision in Movielens re-
+sults. Whereas cosine similarity loss, relying only on pos-
+itive pairs, proves more robust and delivers the largest im-
+provements. Nevertheless, geo-temporal patterns learned in
+training of Movielens dataset may not align with the test
+context, particularly when certain periods are sparsely rep-
+resented, introducing noise and bias into ranking. There-
+fore, we find that omitting geotemporal embeddings in infer-
+ence, resulting from the Id+M+GT train setting in Table 3,
+achieves higher performance than using them throughout
+training and inference (Id+M+GT) for the Movielens dataset
+that is in contrast with what is observed for the produc-
+tion dataset. This demonstrates that geo-temporal features
+are valuable as auxiliary training signals for our production
+dataset but may inject noise when applied directly at test
+time for the ML dataset. Overall, our approach offers flex-
+ibility: geotemporal embeddings can be selectively applied
+according to the temporal characteristics of the target data,
+enabling adaptation to both time-aligned and temporally het-
+erogeneous scenarios.
+Qualitative Results
+To better understand model behavior, we examined sample
+predictions where geo-temporal context improved relevance.
+Example 1On Golden Pond: A user in New Hampshire
+interacted just after July 4. The summer, outdoor context led
+the model to recommend a family drama set in a New Eng-
+land lake house.Example 2Sleepless in Seattle: A user in Seattle inter-
+acted just after New Years. The holiday-themed context rec-
+ommended a romantic film set in Seattle.
+Although anecdotal, these examples indicate that geo-
+temporal context can support more nuanced, thematically
+appropriate recommendations beyond what collaborative
+signals may offer.
+Conclusion and Future Work
+We introduced a novel approach for enriching recommender
+systems with LLM-generated geo-temporal context derived
+from simple signals like timestamp and location. This
+method produces semantically meaningful features such as
+holidays, seasonal events, and regional trends that enhance
+user understanding without relying on long historical data
+or static knowledge bases. In addition to proposing a geo-
+temporal context extraction pipeline, we developed a new
+model integration strategy that incorporates these signals
+into a sequential recommendation framework. Our experi-
+ments on the MovieLens 1M and production dataset show
+that this approach improves ranking quality and increases
+recommendation diversity, particularly in contextually dis-
+tinct scenarios. We also release our enriched dataset to
+support reproducibility and encourage further exploration
+of geo-temporal context-aware recommendation. As future
+work, we plan to evaluate additional datasets and A/B test
+the propose approach in a production environment with ac-
+tual user settings.
+References
+Adomavicius, G.; and Tuzhilin, A. 2011. Context-aware rec-
+ommender systems.AI Magazine, 32(3): 67–80.
+Bertin-Mahieux, T.; Ellis, D. P.; Whitman, B.; and Lamere,
+P. 2011. The Million Song Dataset. InProceedings of
+the 12th International Conference on Music Information Re-
+trieval (ISMIR 2011).
+Bogina, V .; et al. 2022. Considering Temporal Aspects in
+Recommender Systems: A Survey.Media Futures.
+Chen, W.; et al. 2025. TourPIE: Empowering Tourists with
+Multi-criteria Event-Driven Personalized Travel Sequences.
+Information Processing & Management, 62(2).
+Chiroma, H.; and Herawan, T. 2017. Context-Aware Rec-
+ommender System: A Review of Recent Developmental
+Process and Future Research Direction.Applied Sciences,
+7(12): 1211.
+Eghbalzadeh, H.; Shao, S.; Verma, S.; et al. 2024. Proac-
+tive Detection and Calibration of Seasonal Advertisements
+with Multimodal Large Language Models.arXiv preprint
+arXiv:2411.00780.
+Gorgoglione, M.; and Panniello, U. 2019. Modeling Tempo-
+ral Context in Recommender Systems.ACM Transactions
+on Interactive Intelligent Systems, 9(3).
+Gulla, J. A.; Zhang, Z.; Liu, L.; zgbek, .; and Su, X. 2016.
+The Adressa Dataset for News Recommendation. InInter-
+national Conference on Web Engineering, 83–94. Springer.
+Harper, F. M.; and Konstan, J. A. 2015. The movielens
+datasets: History and context.Acm transactions on inter-
+active intelligent systems (tiis), 5(4): 1–19.
+Kang, W.-C.; and McAuley, J. 2018. Self-Attentive Sequen-
+tial Recommendation. InProceedings of the 2018 IEEE In-
+ternational Conference on Data Mining (ICDM), 197–206.
+IEEE.
+Li, Z.; Zhang, X.; Zhang, Y .; Long, D.; Xie, P.; and Zhang,
+M. 2023. Towards general text embeddings with multi-stage
+contrastive learning.arXiv preprint arXiv:2308.03281.
+Ludewig, M.; et al. 2018. Fashion DNA: Merging Con-
+tent and Sales Data for Recommendation and Article Map-
+ping. InProceedings of the 12th ACM Conference on Rec-
+ommender Systems.
+Ma, L.; Cho, J. H. D.; Kumar, S.; and Achan, K.
+2019. Seasonality-Adjusted Conceptual-Relevancy-Aware
+Recommender System in Online Groceries. In2019 IEEE
+International Conference on Big Data (Big Data), 1517–
+1526. IEEE.
+Mateos, P.; and Bellogn, A. 2024. A Systematic Litera-
+ture Review of Recent Advances on Context-Aware Recom-
+mender Systems.Artificial Intelligence Review.
+Meta AI. 2024. Introducing Meta Llama 3: The most capa-
+ble openly available LLM to date. https://ai.meta.com/blog/
+meta-llama-3/. Accessed: 2025-04-30.
+Panniello, U.; Gorgoglione, M.; and Tuzhilin, A. 2016. In
+CARSs We Trust: How Context-Aware Recommendations
+Affect Customers Trust and Other Business Performance
+Measures.Information Systems Research, 27(1): 182–196.Raza, S.; and Ding, C. 2019. Progress in Context-Aware
+Recommender SystemsAn Overview.Computer Science Re-
+view, 31: 84–97.
+Trattner, C.; and Elsweiler, D. 2019. On the Predictability of
+Time-Aware Food Preferences: Modeling and Evaluation. In
+Proceedings of the 27th ACM Conference on User Modeling,
+Adaptation and Personalization, 143–151.
+Wang, H.; Zhang, F.; Wang, J.; Zhao, M.; Li, W.; Xie, X.;
+and Guo, M. 2018. RippleNet: Propagating User Prefer-
+ences on the Knowledge Graph for Recommender Systems.
+InProceedings of the 27th ACM International Conference
+on Information and Knowledge Management (CIKM), 417–
+426.
+Wei, L.; Liu, C.; Zhang, R.; and Liang, X. 2024. Syn-
+thetic Interaction Generation for Sparse Recommender Sys-
+tems using Large Language Models.arXiv preprint
+arXiv:2401.01234.
+Xu, X.; Xu, Z.; Yu, P.; and Wang, J. 2025. Enhancing User
+Intent for Recommendation Systems via Large Language
+Models. InSPIE 13635, Artificial Intelligence and Ma-
+chine Learning for Multi-Domain Operations Applications
+VII, volume 13635, 1363507.
+Yoon, J.; and Choi, C. 2023. Real-Time Context-Aware Rec-
+ommendation System for Tourism.Sensors, 23(7): 3679.
+Appendix A. Absolute Performance of
+MovieLens Dataset
+We have shown explorer results in Table 3 using percentage
+improvment over baseline. Table 4 the actual values for each
+metric are displayed.
+Model Variation MovieLens Dataset
+NDCG@5 NDCG@10 HR@1 HR@5 HR@10
+Baseline(SASRec) 0.0395 0.0648 0.0008 0.0810 0.1598
+M 0.0491 0.0721 0.0108 0.0889 0.1610
+Id+M 0.0446 0.0694 0.0038 0.0878 0.1651
+Id+M+GT train 0.0581 0.0842 0.0195 0.0985 0.1800
+Id+M+GT 0.0566 0.0804 0.01950.0950 0.1696
+M+GT train 0.0486 0.0726 0.0118 0.0873 0.1624
+M+GT 0.0520 0.0759 0.0134 0.0921 0.1664
+Loss-[BCE] 0.0435 0.0682 0.0012 0.0878 0.1649
+Loss-[Cos] 0.0432 0.0699 0.0008 0.0879 0.1714
+Loss-[Pairwise rand] 0.0418 0.0674 0.0010 0.0848 0.1648
+Loss-[Pairwise sem] 0.0384 0.0604 0.0012 0.0763 0.1444
+Table 4: Model performance comparison for explorer users.
+Bold = best, underline = second best per metric within each
+dataset.

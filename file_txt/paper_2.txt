@@ -1,0 +1,564 @@
+AdSum: Two-stream Audio-visual Summarization for Automated Video Advertisement Clipping
+
+AdSum: Two-stream Audio-visual Summarization
+for Automated Video Advertisement Clipping
+Wen Xie1, Yanjun Zhu1, Gijs Overgoor2, Yakov Bart1, Agata Lapedriza
+Garcia1, and Sarah Ostadabbas1
+1Northeastern University, United States of America
+{we.xie, ya.zhu„ y.bart, a.lapedriza, s.ostadabbas}@northeastern.edu
+2Southern Methodist University, United States of America
+govergoor@mail.smu.edu
+Abstract.Advertisers commonly need multiple versions of the same
+advertisement (ad) at varying durations for a single campaign. The tra-
+ditional approach involves manually selecting and re-editing shots from
+longer video ads to create shorter versions, which is labor-intensive and
+time-consuming. In this paper, we introduce a framework for automated
+video ad clipping using video summarization techniques. We are the first
+to frame video clipping as a shot selection problem, tailored specifically
+for advertising. Unlike existing general video summarization methods
+that primarily focus on visual content, our approach emphasizes the crit-
+ical role of audio in advertising. To achieve this, we develop a two-stream
+audio-visual fusion model that predicts the importance of video frames,
+where importance is defined as the likelihood of a frame being selected in
+the firm-produced short ad. To address the lack of ad-specific datasets,
+we present AdSum204, a novel dataset comprising 102 pairs of 30-second
+and 15-second ads from real advertising campaigns. Extensive experi-
+ments demonstrate that our model outperforms state-of-the-art methods
+across various metrics, including Average Precision, Area Under Curve,
+Spearman, and Kendall. The dataset and code will be made publicly
+available upon acceptance.
+Keywords:Ad clipping·Video summarization·Visual-audio learning.
+1 Introduction
+As content production and consumption continue to grow, our attention spans
+are diminishing. This trend compels content creators to adapt long-form videos
+into shorter versions efficiently. This need is particularly evident in the advertis-
+ing industry. For instance, social platforms often require shorter ads (e.g., 15s),
+while TV ads typically span 30s (see examples in Figure 1). Advertisers currently
+address these needs through a costly, labor-intensive, and time-consuming pro-
+cess of manually selecting video shots. To mitigate these challenges, industry
+leaders call for solutions [21].
+Video summarization is promising to automate the process. However, sum-
+marization for ad clipping has several challenges. First, video summarization isarXiv:2510.26569v1  [cs.CV]  30 Oct 2025
+2 Authors Suppressed Due to Excessive Length
+Fig. 1.Videoadswithvariousdurationsinthesamecampaign.Thescreenshotsinclude
+two examples of long (i.e., 31-second) and short (i.e., 16-second) video ads from brands’
+YouTube channels. Red circles (orange squares) highlight the ad durations (titles).
+inherently domain-specific, limiting the applicability of existing methods in the
+advertising context [16]. For instance, in sports, summarization creates high-
+lights, capturing the most exciting moments (typically characterized by abrupt
+motion changes). In contrast, advertising requires summarized videos to main-
+tain a coherent storyline that effectively promotes the products or services. This
+distinction suggests the need for a summarization approach specifically tailored
+to advertising, a gap that has yet to be addressed in the literature. Second,
+existing video summarization datasets [8, 23, 9, 2] are not well-suited for adver-
+tising applications. Most datasets feature videos that are several minutes long,
+whereas video ads typically last less than a minute. Additionally, the content of
+these datasets differs significantly from ad content, making it difficult for algo-
+rithms to learn relevant representations of advertising. Therefore, developing a
+specialized dataset is essential to support video ad summarization. Third, most
+existingsummarizationtechniquesprimarilyfocusonthevisualinformation[19].
+In advertising, however, the accompanying audio plays an equally critical role.
+Audio conveys essential information such as product name, benefits, and calls-
+to-actions, complementing the visual content [29]. Therefore, an effective sum-
+marization model capable of integrating both visual and audio modalities offers
+significant potential [11].
+We first introduce a video summarization task specifically designed for ad
+clipping in advertising. Due to the prevalence of 15-second and 30-second ads
+in advertising and the preference from media users [26], we regard 30-second
+ads as long ads and 15-second ads as short ads in this study. Our objective is
+to produce 15-second ads from their 30-second counterparts by leveraging both
+long and short versions used within the same marketing campaigns. We define
+the task as a shot selection problem driven by practical needs: given all the shots
+in a 30-second ad, the goal is to select a subset of shots to create a 15-second ad.
+Figure 2 illustrates one 30- and 15-second ad pair. Due to the availability of 15-
+second ads, we can address the task using supervised learning methods. To this
+end, we present AdSum204, a novel dataset comprising 102 pairs of 30-second
+and 15-second video ads from real advertising campaigns. Each pair is annotated
+Title Suppressed Due to Excessive Length 3
+with precise shot boundaries to enable effective training and the evaluation of
+machine learning (ML) models.
+Fig. 2.Shot selection. The figure illustrates a pair of 30-second and 15-second ads from
+a McDonald’s ad campaign. The 30-second ad (left) contains 17 shots. The 15-second
+ad (right) contains 9 shots from the 30-second ad, as indicated by the matching (e.g.,
+shot 1 - shot 1). We show the first and last frames of each shot for better presentation.
+To benchmark the task, we propose a two-stream audio-visual fusion model
+to predict frame importance for constructing short video ads, where the audio
+and video are temporally synchronized. In the visual stream, we use 3D convo-
+lutional neural networks (CNN) for clip-level feature embedding. Compared to
+2D CNN for frame-level features [1], we combine a 3D CNN and an attention
+module [22] to capture spatial and temporal relationships. A linear classifier then
+predicts the importance score of each frame. In the audio stream, we adopt a
+similar pipeline but use Wav2Vec2 (Wave-to-Vector 2) to extract clip-level fea-
+tures [4]. We investigate both early fusion (e.g., feature fusion) and late fusion
+(e.g., importance score fusion) techniques to enhance overall performance.
+In sum, our contributions are three-fold. First, we introduce a novel audio-
+visual summarization task, specifically for advertising. Second, we present Ad-
+Sum204, a first-ever dataset dedicated to ad summarization. Third, we propose a
+two-stream audio-visual fusion model that achieves state-of-the-art performance
+compared to [1, 22] on AdSum204. This work provides a robust framework for
+ad clipping, aligning with current trends in content consumption and advertising
+while addressing the urgent need of research in this domain.
+2 Related Work
+2.1 Video Summarization Applications and Datasets
+Existing literature has applied video summarization techniques to diverse appli-
+cations with unique objective. In surveillance, researchers aim to extract events
+or activities from cameras to enhance security [6]. In sports, they capture player
+actions across multiple cameras for highlights [11, 19]. The film industry uses
+key-frame extraction to summarize characters and scenes for trailers [14]. News
+clips condense anchors, interviews, and debates for quick overviews, and personal
+videos extract meaningful moments for easy sharing [8].
+Table 1 compares existing video summarization datasets and applications
+to ours. Notably, no existing datasets apply to advertising because their video
+durations are much longer than those of video ads, and the video content differs
+significantly. Moreover, the ground truth in those datasets is created by human
+4 Authors Suppressed Due to Excessive Length
+Table 1.Video summarization: applications and datasets.
+Application Dataset Size Duration (minutes)
+SurveillanceOLCB [7] 17 5-15
+BL-7F [18] 19 7.1
+GeneralVSUMM [5] 50 1-4
+SumMe [8] 25 1-6
+MED [20] 160 1-5
+TVSum [23] 50 2-10
+RAD [27] 200 2-3
+AdvertisingAdSum204 (ours)204 0-1
+annotators, suffering from subjectivity [17]. In contrast, the ground truth (i.e.,
+short video ads) in our dataset comes directly from advertisers. We reasonably
+assume that these short ads represent the best firms’ attempt to replicate the
+effectiveness of the longer video ads by selecting the most relevant shots. Thus,
+our goal is to automate the selection of these crucial shots.
+This paper is the first to introduce ad clipping as a novel application of video
+summarization. Instead of picking out highlights, motions, or events, video ads
+require a cohesive storyline, demanding a new summarization methodology.
+2.2 Video Summarization Techniques
+Video summarization aims to produce a concise and informative summary of
+long videos by either selecting key frames (storyboard) or shots (video skim)
+[16]. While static summaries struggle to maintain coherence with the original
+narrative, dynamic summaries composed of different shots can better preserve
+the storyline, which is desired in this study.
+Summarization models typically predict an importance score for each frame
+and select the most important ones to create the summary. Techniques like con-
+volutional neural networks, recurrent neural networks, long short-term memory
+networks, and reinforcement learning have been widely used to extract features
+and capture temporal dependencies between frames [16]. Attention mechanisms,
+suchasself-attention,furtherenhancethesemodelsbyfocusingonsalientframes,
+improving summarization quality [10]. Meanwhile, researchers have been consid-
+ering the tradeoff between summary diversity and representativeness [13] or the
+relation between temporal and spatial information [30]. For instance, [1] incorpo-
+rates a context-awareness module to consider the global video context, resulting
+in more coherent and contextually relevant summaries. Recently, [22] proposes
+to use CNN to learn spatial and temporal cues simultaneously, which shows
+competitive performance. Our approach adopts a similar attention strategy due
+to the importance of temporal contiguity in video ads.
+Title Suppressed Due to Excessive Length 5
+3 Problem Formulation and Dataset
+3.1 Problem Formulation
+Given a sequence of shots in a 30-second ad, our goal is to select a combination of
+shots that are used to create a 15-second ad. We formulated the task as follows:
+S∗=F(shot 1,shot 2, . . . ,shot m),(1)
+whereFis the summarization model that selects the optimal subset of shotsS∗
+from the 30-second ad. This task can be fulfilled by supervised ML as we have
+both 30- and 15-second ads provided by companies.
+3.2 AdSum204 Dataset
+We introduceAdSum204, a video summarization dataset specifically for adver-
+tising; it contains 102 pairs of video ads, with each pair consisting of a 15-second
+and a 30-second ad used within the same marketing campaign by companies,
+collected from YouTube.
+First,weselectthebrandnamesofthetop50fast-foodchainsrankedbysales
+according to QSR Magazine [15], as well as the names of the top 10 most popular
+soft drink brands in the USA [25]. We focus on these two sectors to demonstrate
+the crucial needs of ad summarization tools, as the market is projected to grow
+from $6.2 trillion in 2024 to $9.8 trillion by 2032 globally, and firms in the food
+and beverage market invest heavily in advertising [12]. We manually gather their
+YouTube handles and channel IDs. Second, we utilize the YouTube Data API
+to collect the playlists and videos from each brand and sort the results by video
+name and duration. These steps enable us to quickly identify potential ad pairs.
+For instance, the two video ads in the left panel of Figure 1 from Chick-fil-A
+form an ad pair. In total, we gathered 135 30s-15s ad pair candidates, of which
+127 pairs are English speaking.
+The main challenge of making a qualified dataset is the ground-truth an-
+notation of shot selections. For each pair, it is necessary to find which video
+shots are selected from a 30s ad to make the 15s ad. To this end, we present
+our two-step approach: (1) shot boundary detection and (2) shot matching. We
+first apply the shot boundary detection model, TransNetV2 [24], to each pair.
+TransNetV2 predicts the probability of each video frame being a shot boundary.
+We experiment with probability thresholds 0.1, 0.3, and 0.5 to ensure accuracy.
+These automated steps significantly improving annotation efficiency.
+Next, we compare the shot-level similarity between the 15-second and 30-
+second ads. To do this, we extract SIFT (scale-invariant feature transform) fea-
+tures from the first, middle, and last frames of each shot. SIFT is well-suited for
+this task because it detects and describes local keypoints in images that are ro-
+bust to changes in scale, rotation, and illumination. By comparing the keypoints
+and their descriptors between two frames, we can quantify their visual similarity.
+The average similarity score across these frames is used to match each shot in
+the 15-second ad with the shot in the 30-second ad that has the largest similarity
+6 Authors Suppressed Due to Excessive Length
+Fig. 3.An overview of videos in our dataset. We sample frames from 36 (3x12) videos.
+Fig. 4.Shot count and duration histogram. 30-second (15-second) ads contain 18 (10)
+shots on average; the average shot duration is 1.67 (1.53) seconds, respectively.
+score. Following this process, we manually review the shot mapping to ensure
+100% annotation accuracy3. Out of 135 candidate ad pairs, 33 are removed due
+to missing shots in the 30-second ad. This leaves us with a total of 102 valid ad
+pairs.
+We illustrate the video ads in Figure 3 using 36 frames, with each frame
+sampled from a different video. Among the 102 ad pairs, 74 have a frame rate
+of 23.98 frames per second (FPS), 18 have 25 FPS, 9 have 29.97 FPS, and one
+pair has 30 FPS. We standardize all 30-second videos to 23.98 FPS so that each
+second contains the same number of frames across all videos. Figure 4 shows
+the basic statistics. The 30-second ads have an average shot count of 18, with a
+minimum of 8 and a maximum of 38 shots. In contrast, the 15-second ads have
+an average shot count of 8, with a minimum of 3 and a maximum of 18 shots.
+The average shot duration is 1.67 seconds in the 30-second ads and 1.52 seconds
+in the 15-second ads. The shot durations range from 0.19 to 13.56 seconds in the
+30-second ads, and from 0.23 to 10.44 seconds in the 15-second ads.
+To facilitate future research, we will release the following: unique ad pair
+identifier, YouTube video IDs, shot boundaries for each ad, and shot mapping
+from 30-second ads to 15-second ads. We divide the dataset into five folds based
+on the pair ID for cross-validation, ensuring that each fold is used as a testing set
+once while the remaining four folds serve as the training set, similar to existing
+datasets [e.g., 23].
+4 Methodology
+We first show the pipeline of our ad clipping framework. Then, we introduce the
+proposed two-stream audio-visual ad summarization (AdSum) model.
+3Note that this process is used solely to assist in identifying the ground truth, which
+already exists in our case, i.e., the 15-second ads. This differs from other datasets,
+where ground truth summaries are generated by human annotators.
+Title Suppressed Due to Excessive Length 7
+Fig. 5.Adclippingpipeline.Ourmethodologyincludesthreesteps:(1)shotgeneration,
+(2) frame importance prediction, and (3) shot selection to make a short video ad.
+4.1 Ad Clipping Pipeline
+Figure 5 shows our ad clipping pipeline, consisting of three steps: (1) shot gener-
+ation, (2) frame importance prediction, and (3) shot selection. We briefly discuss
+Step 1 and 3 below and present Step 2 in details in the next subsection, which is
+thecoreofthepipeline.InStep1,wefirstappliedTransNetV2forshotboundary
+detection, followed by manual validation to ensure accuracy. In step 3, we first
+average the importance scores of frames within each shot to determine the shot’s
+overall importance. We then rank the shots based on these importance scores
+and compute the duration of each shot based on the number of frames and FPS.
+Starting from the top-ranked shots, we select each shot until the cumulative
+duration reaches or exceeds the threshold.
+4.2 AdSum Architecture
+Predictingframeimportanceisthecrucialstepinadclipping.Figure6illustrates
+ouradsummarizationmodel(AdSumhereafter)withtwostreams,i.e.,thevisual
+stream (AdSum-V) and the audio stream (AdSum-A). Given an input video,
+AdSum predicts the importance score of each frame by fusing the two streams.
+Visual Stream (AdSum-V).In the visual stream, we start with feature
+embeddings. Existing studies utilize pre-trained 2DCNNs, such as GoogleNet
+[22], to extract frame-level features. For each video frame, 2DCNNs output a
+single-dimensional vector of length D. However, frame-level feature embeddings
+ignore contextual and temporal information across frames within shots. Ad-
+ditionally, frame-level features may fail to capture the nuances of transitions
+between shots, where frames could appear visually similar. To address the chal-
+lenge, we apply 3DCNN for clip-level feature embedding. 3DCNN takes as input
+a sequence of frames (i.e., a clip) rather than a simple frame. The selection of
+frames to make each clip is crucial. As we aim to select the most important shots,
+ideal clips are those that can reflect the uniqueness of each shot. We split a video
+into T clips, where frames in each clip are from the same shot. For each clip,
+3DCNN generates a D-dimensional embedding; for a single video, we can obtain
+a (T x D) feature map. Since video shots and clips may have limited frames, we
+use the pre-trained video Swin Transformer (Swin3D) [13] as the 3DCNN, which
+8 Authors Suppressed Due to Excessive Length
+generates 1024-dimensional features, without specifying a fixed temporal length
+as input, which is typically required in other models [28].
+Fig. 6.Two-stream audio-video fusion model. In the visual stream, we use 3DCNN to
+extract segment-level feature map for a video. Then, we use CNN for attention [22],
+followed by a classifier to predict the importance score. The audio stream has a similar
+procedure except that we use Wac2Vec2 [3] for audio segment feature embedding. We
+show the late fusion (importance score fusion) in the figure. In contrast, the early
+fusion combines the visual and audio feature maps. Note that each input audio clip is
+temporally synchronized with the video clip.
+Next, we regard the feature map as an image and apply a CNN to generate
+an attention map as [22] shows that such a method can improve the perfor-
+mance while largely improving the efficiency. CNN-based attention maps can
+capture spatial and temporal relations simultaneously because one dimension of
+the feature map is spatial while another is temporal. We deploy GoogleNet for
+producing the attention map and Hadamard product to merge the feature map
+and attention map together. Finally, a linear classifier with a sigmoid layer is
+used to predict the importance score of each clip, similar to [22].
+Audio Stream (AdSum-A).Overall,theaudiostreamhasasimilarpipeline
+to the visual stream except for the implementation of the feature embedding.
+With a video and its clips used in the visual stream, we accordingly obtain
+the audio clip of each video clip. As such, each audio clip contains information
+that reflects the corresponding visual part. Put it another way, each input audio
+clip is temporally synchronized with the video clip. For each audio clip, we use
+the Wav2Vec2 technique to embed the raw auditory signal into D-dimensional
+vectors. Specifically, we deploy the pre-trained Wav2Vec2-BERT [4] for the em-
+bedding of the audio clip, generating a 1024-dimensional vector for each audio
+clip. Then, we stack the embeddings together to construct a feature map with
+size (T X D) for the audio. The following process includes applying CNN for
+attention and predicting the importance scores similar to the visual stream.
+Two-stream Fusion.Both visual and auditory signals play a critical role
+in video advertisements, contributing to the effective promotion of products or
+services. To better understand how advertisers create short ads, we employ two
+Title Suppressed Due to Excessive Length 9
+fusion techniques. Figure 6 shows the late fusion, where the final importance
+score vector is computed as follows:
+I=α×I visual + (1−α)×I audio.(2)
+whereαis a coefficient to balance the weights of the two streams. In addition, we
+also explore an early fusion strategy. We combine the visual and audio feature
+maps as follows:
+FM=β×FM visual + (1−β)×FM audio,(3)
+where FM represents the feature map andβis a coefficient to balance the two
+streams. Using these fused features, we train the model to predict the final
+importance scores.
+Loss Function.The mean squared error (MSE) loss is commonly used in
+summarization models [22]. However, in our dataset, the ground truth is binary,
+with values of 0 or 1 indicating whether each frame is selected. Therefore, we
+employ binary cross-entropy loss (BCE), defined as:
+L=−1
+TTX
+i=1h
+S(i)
+glog(S(i)
+p) + (1−S(i)
+g) log(1−S(i)
+p)i
+,(4)
+whereS(i)
+pis the predicted score for thei-th frame,S(i)
+gis the ground truth label,
+andTis the total number of frames.
+5 Experiments
+5.1 Settings
+Training Strategies.Similar to prior work on the TVSum [23] and SumMe [8]
+datasets, we employ a five-fold cross-validation approach. The dataset is divided
+into five distinct subsets, and in each iteration, one subset is used for testing
+while the remaining four subsets are used for training. This process is repeated
+five times. We thus report the average evaluation performance across all splits.
+During training, we use the Adam optimizer. We set the number of epochs to 50,
+with a batch size of 1, and a learning rate of 0.001. We set the fusion parameters
+αandβin (2) and (3) as 0.5.
+Clip-level Feature Embedding.Videos in our dataset have an FPS of
+23.98. To align with the convention of 2 FPS used in prior studies [30], we sample
+every 12th frame in each video as the focal frame. For the clip-level feature, we
+use half-window sizes (HWS) 3 and 5. Specifically, we group the left and right 3
+or 5 frames into a single clip for each sampled frame. As a comparison to 3DCNN
+embedding, we obtain feature embedding from GoogleNet (as used in [22]) for
+each frame in a clip, followed by an average pooling.
+Evaluation Metrics.Recent studies use correlation metrics [28, 22]. We use
+four metrics for a comprehensive assessment: AP and the area under the ROC
+curve (AUROC), Spearman (σ), and Kendall (τ) correlation. Specifically, based
+on the selected shots and ground truth shots for each video ad, we calculate
+the number of true positives, false positives, and false negatives. Accordingly, we
+compute the Precision, Recall, and F1 score.
+10 Authors Suppressed Due to Excessive Length
+Table 2.Model performance.T(S) represents pre-trained models on TVSum
+(SumMe). Our two fusion models are based on a HWS of 3. The best performances are
+highlighted in bold.
+Model AP AUROCσ τ
+CA-SUMT[1] 0.659 0.504 0.006 0.005
+CA-SUMS[1] 0.649 0.468 -0.025 -0.020
+CSTAT[22] 0.651 0.477 -0.038 -0.032
+CSTAS[22] 0.622 0.432 -0.107 -0.088
+CSTA [22] 0.773 0.646 0.241 0.199
+CSTA + BCE Loss 0.777 0.647 0.242 0.199
+AdSum(early fusion)0.783 0.665 0.273 0.224
+AdSum(late fusion) 0.764 0.649 0.245 0.201
+5.2 Results
+In this subsection, we first show the quantitative performance of our AdSum
+model and then explore the qualitative results of the two streams.
+Quantitative Results.Tobenchmarkourmodel,wecompareitagainsttwo
+recentmethods:theunsupervisedlearningmodelCA-SUM[1]andthesupervised
+learning model CSTA [22]. For both CA-SUM and CSTA, we follow the original
+implementation, downsampling each video to 2fps and using the pool5 layer of
+GoogleNet to extract frame-level features. Then, we use the pre-trained weights
+on TVSum and SumMe to predict the frame importance scores and select shots
+to make 15-second ads accordingly. We report the average performance on all
+videos.
+We conduct several ablation studies by training CSTA on our AdSum204
+datasetwithdifferentsettings:(1)usetheoriginalMSEloss,(2)useBCEloss,(3)
+use 3 and 5 half window size (HWS) to enrich the feature map. We also compare
+the performance of the visual stream (AdSum-V) vs. the audio stream (AdSum-
+A). We report the five-fold cross-validation results on the testing datasets.
+Table 2 presents the evaluation results. As expected, the pre-trained models,
+including both CA-SUM and CSTA, do not perform well on video ads since
+they were not trained on video ads. Training CSTA on our dataset improves
+the performance. However, our proposed two-stream model with an early fusion
+strategy achieves the best performance across all four metrics. In contrast, the
+late fusion variant does not yield performance gains.
+In the early fusion approach, we combine the visual and audio feature maps
+before applying attention, whereas in the late fusion approach, we fuse the final
+predicted importance scores. The results highlight the advantage of integrating
+visual and audio embeddings prior to attention: applying attention at this stage
+more effectively captures the interplay between modalities, thereby improving
+overall performance.
+Table 3 documents the results of our ablation studies. First, replacing the
+mean squared error loss used in [22] with binary cross-entropy (BCE) loss leads
+Title Suppressed Due to Excessive Length 11
+Table 3.Ablation study results on loss function, window size, and comparisons of the
+visual and audio stream. The best performances are highlighted in bold.
+Ablation Item AP AUROCσ τ
+Loss Function
+CSTA [22] 0.773 0.646 0.241 0.199
+CSTA + BCE Loss0.777 0.647 0.2420.199
+Window Size
+CSTA (3HWS) + BCE0.781 0.652 0.251 0.207
+CSTA (5HWS) + BCE 0.779 0.650 0.247 0.204
+Stream
+AdSum-V(3HWS) 0.775 0.654 0.256 0.210
+AdSum-A(3HWS)0.780 0.664 0.270 0.224
+AdSum(early fusion)0.783 0.665 0.273 0.224
+(a) Performance on different shots (b) A selection example
+Fig. 7.Performance comparison between audio and visual stream. The audio stream
+performs better than the visual stream in selecting certain shots (e.g., ending shots).
+to improved performance in terms of AP, AUROC, andσ. Second, incorporating
+features from surrounding frames further enhances model performance. Notably,
+using a half window size of 3 consistently outperforms a window size of 5 across
+all four metrics. These findings underscore the effectiveness of our proposed 3D-
+CNN clip-level feature embedding in capturing temporal information.
+In comparing the two single-modality streams, the audio stream (AdSum-A)
+outperforms the visual stream (AdSum-V) across all four metrics, i.e., AP, AU-
+ROC,σ, andτ. Recall that the input audio and visual clips are temporally syn-
+chronized. This result underscores the critical role of audio in video ad summa-
+rization. This contrasts with other domains, such as sports video summarization,
+where visual features alone often suffice to capture key content like motion. In
+advertising, however, audio carries essential information, such as product details,
+contact information, and promotional messages, making it a vital contributor to
+effective summarization.
+To provide further evidence of the advantages of both models, especially the
+audio information, we analyze the performance of AdSum_A and AdSum_V by
+splitting shots in each video into two parts: 0–50% and 50–100%. The AP score
+boxplotsinPanel(a)ofFigure7illustratethat,overall,AdSum_Ademonstrates
+better performance in the first half (0–50%), whereas AdSum-V performs better
+12 Authors Suppressed Due to Excessive Length
+in selecting shots from the latter half of the video (50–100%). This result may
+align well with the structural characteristic of video ads: the beginning often em-
+phasizes engaging elements, such as attention-grabbing questions through audio,
+while the latter half focuses more on product visualization via visuals. Moreover,
+the ad narrative could play a crucial role in maintaining the coherence of selected
+shots, addressing the unique challenge in advertising.
+Qualitative Results.We further demonstrate the importance of audio in
+ad summarization through one example of a McDonald’s ad (“video 7”) titled
+“McHappy Day 2023.” Figure 7, Panel (b) shows the shot selection results by
+the proposed models. The 30-second ad narrative is “It’s more than just a day.
+From now until Saturday, November 18, it’s the McHappiest time of the
+year. So give a helping hand. One more. Would you like silly socks with that?
+Yep. Pull up your silly socks andgive $2 back with every Big Mac. Who
+ordered the Big Macs? I did! To help families with seriously ill or
+injured children. Have a good day.” The bold text indicates the narrative
+in the 15-second ad. Audio delivers contextual information, such as specific dates
+and actionable instructions. In Panel (b) of Figure 7, the audio model indeed
+performs better in selecting the ending shots, potentially guided by the ending
+narratives. This example highlights the critical role of audio in maintaining the
+storyline’s integrity and effectiveness.
+5.3 Limitations and Future Work
+We discuss limitations related to both the dataset and the modeling approach
+below to help guide future research directions. First, although the size of our
+AdSum204 dataset is larger or comparable to the existing public dataset for
+video summarization, it is worth scaling up the dataset further by incorporating
+more video pairs and covering a broader range of industries. Nonetheless, this
+does not diminish the contribution of our work, i.e., a novel application with
+particular significance in the food and beverage industry, given its substantial
+market size. Second, while our proposed two-stream model already outperforms
+benchmarks, it still has room for improvement. For example, while we fuse visual
+and audio features, future work could explore integrating cross-attention mech-
+anisms to enable deeper interaction across modalities. Third, while 30-second
+and 15-second ads dominate TV and most social media advertising, future work
+can apply our framework to generate ad versions of various durations without
+sacrificing generalizability.
+6 Conclusion
+Automated video ad clipping from long video ads into shorter versions is crucial
+for advertisers aiming to adapt content effectively across diverse formats while
+minimizing costs. To address this need, we introduce a novel ad clipping task
+and develop a dedicated dataset AdSum204, which consists of 204 video ads
+with temporally synchronized visual and audio information. Our proposed two-
+stream audio-visual fusion model demonstrates the effectiveness of integrating
+visual and audio modalities for predicting the importance of video frames. Our
+Title Suppressed Due to Excessive Length 13
+findings highlight the superiority of 3D CNNs for feature embedding, surpassing
+traditional 2D CNN-based approaches [e.g., 22]. Moreover, the early fusion strat-
+egy, which integrates both visual and audio cues, achieves the best performance.
+Furthermore, early fusion strategies that combine both visual and audio cues
+deliver the best performance, emphasizing the importance of audio in video ad
+clipping.
+Bibliography
+[1] Apostolidis, E., Balaouras, G., Mezaris, V., Patras, I.: Summarizing videos
+using concentrated attention and considering the uniqueness and diversity
+of the video frames. In: Proceedings of the 2022 International Conference
+on Multimedia Retrieval. pp. 407–415 (2022)
+[2] Argaw, D.M., Yoon, S., Heilbron, F.C., Deilamsalehy, H., Bui, T., Wang, Z.,
+Dernoncourt, F., Chung, J.S.: Scaling up video summarization pretraining
+with large language models. In: Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition. pp. 8332–8341 (2024)
+[3] Baevski, A., Zhou, Y., Mohamed, A., Auli, M.: Wav2vec 2.0: A framework
+for self-supervised learning of speech representations. Advances in Neural
+Information Processing Systems33, 12449–12460 (2020)
+[4] Barrault, L., Chung, Y.A., Meglioli, M.C., Dale, D., Dong, N., Dup-
+penthaler, M., Duquenne, P.A., Ellis, B., Elsahar, H., Haaheim, J., et al.:
+Seamless: Multilingual expressive and streaming speech translation. ArXiv
+Preprint ArXiv:2312.05187 (2023)
+[5] De Avila, S.E.F., Lopes, A.P.B., da Luz Jr, A., de Albuquerque Araújo, A.:
+Vsumm: A mechanism designed to produce static video summaries and a
+novel evaluation method. Pattern Recognition Letters32(1), 56–68 (2011)
+[6] Fang, Z., Fei, F., Fang, Y., Lee, C., Xiong, N., Shu, L., Chen, S.: Abnormal
+event detection in crowded scenes based on deep learning. Multimedia Tools
+and Applications75, 14617–14639 (2016)
+[7] Fu, Y., Guo, Y., Zhu, Y., Liu, F., Song, C., Zhou, Z.H.: Multi-view video
+summarization. IEEE Transactions on Multimedia12(7), 717–729 (2010)
+[8] Gygli, M., Grabner, H., Riemenschneider, H., Van Gool, L.: Creating sum-
+maries from user videos. In: Computer Vision–ECCV 2014: 13th European
+Conference, Zurich, Switzerland, September 6-12, 2014, Proceedings, Part
+VII 13. pp. 505–520. Springer (2014)
+[9] Ji, Z., Ma, Y., Pang, Y., Li, X.: Query-aware sparse coding for web multi-
+video summarization. Information Sciences478, 152–166 (2019)
+[10] Ji, Z., Xiong, K., Pang, Y., Li, X.: Video summarization with attention-
+based encoder–decoder networks. IEEE Transactions on Circuits and Sys-
+tems for Video Technology30(6), 1709–1717 (2019)
+[11] Khan, A.A., Shao, J., Ali, W., Tumrani, S.: Content-aware summarization
+of broadcast sports videos: An audio–visual feature extraction approach.
+Neural Processing Letters52(3), 1945–1968 (2020)
+[12] LeverX: Top 2025 challenges in food & beverage industry. Online URL
+(2025)
+[13] Liu, T., Meng, Q., Huang, J.J., Vlontzos, A., Rueckert, D., Kainz, B.: Video
+summarization through reinforcement learning with a 3d spatio-temporal u-
+net. IEEE Transactions on Image Processing31, 1573–1586 (2022)
+[14] Liu, X., Shi, S.W., Teixeira, T., Wedel, M.: Video content marketing: The
+making of clips. Journal of Marketing82(4), 86–101 (2018)
+Title Suppressed Due to Excessive Length 15
+[15] Magazine, Q.: The top 50 fast-food chains in america. Online URL (2023)
+[16] Meena, P., Kumar, H., Yadav, S.K.: A review on video summarization
+techniques. Engineering Applications of Artificial Intelligence118, 105667
+(2023)
+[17] Otani, M., Nakashima, Y., Rahtu, E., Heikkila, J.: Rethinking the evalua-
+tion of video summaries. In: Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition. pp. 7596–7604 (2019)
+[18] Ou, S.H., Lee, C.H., Somayazulu, V.S., Chen, Y.K., Chien, S.Y.: On-line
+multi-view video summarization for wireless video sensor network. IEEE
+Journal of Selected Topics in Signal Processing9(1), 165–179 (2014)
+[19] Tejero-de Pablos, A., Nakashima, Y., Sato, T., Yokoya, N., Linna, M.,
+Rahtu, E.: Summarization of user-generated sports video by using deep
+action recognition features. IEEE Transactions on Multimedia20(8), 2000–
+2011 (2018)
+[20] Potapov, D., Douze, M., Harchaoui, Z., Schmid, C.: Category-specific video
+summarization. In: Computer Vision–ECCV 2014: 13th European Confer-
+ence, Zurich, Switzerland, September 6-12, 2014, Proceedings, Part VI 13.
+pp. 540–555. Springer (2014)
+[21] Reduct.Video: Video summarizer for marketing professionals - 17 use cases.
+Online URL (2023)
+[22] Son, J., Park, J., Kim, K.: Csta: Cnn-based spatiotemporal attention for
+video summarization. In: Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition. pp. 18847–18856 (2024)
+[23] Song, Y., Vallmitjana, J., Stent, A., Jaimes, A.: Tvsum: Summarizing web
+videos using titles. In: Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition. pp. 5179–5187 (2015)
+[24] Souček, T., Lokoč, J.: Transnet v2: An effective deep network architecture
+for fast shot transition detection. ArXiv Preprint ArXiv:2008.04838 (2020)
+[25] Statista: Leading soft drink brands ranked by brand awareness in the united
+states in 2023. Online URL (2024)
+[26] TVision Insights: Study: Online and on tv, consumers prefer longer ads to
+shorter ones. Online URL (2023)
+[27] Vasudevan, A.B., Gygli, M., Volokitin, A., Van Gool, L.: Query-adaptive
+video summarization via quality-aware relevance estimation. In: Proceed-
+ings of the 25th ACM International Conference on Multimedia. pp. 582–590
+(2017)
+[28] Xie, S., Sun, C., Huang, J., Tu, Z., Murphy, K.: Rethinking spatiotempo-
+ral feature learning: Speed-accuracy trade-offs in video classification. In:
+Proceedings of the European Conference on Computer Vision (ECCV). pp.
+305–321 (2018)
+[29] Xie, W., Luan, L., Zhu, Y., Bart, Y., Ostadabbas, S.: Multimodal drivers
+of attention interruption to baby product video ads. In: International Con-
+ference on Pattern Recognition. pp. 303–318. Springer (2024)
+[30] Zhang, K., Chao, W.L., Sha, F., Grauman, K.: Video summarization with
+long short-term memory. In: Computer Vision–ECCV 2016: 14th European
+Conference, Amsterdam, The Netherlands, October 11–14, 2016, Proceed-
+ings, Part VII 14. pp. 766–782. Springer (2016)
