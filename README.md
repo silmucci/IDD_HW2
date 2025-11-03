@@ -14,9 +14,9 @@ Analyzer utilizzati:
 
 Flusso di lavoro:
 Eseguire:
-1. download_txt.py 
-2. TXTIndexer.java
-3. TXTSearcher.java
+1. `download_txt.py`
+2. `TXTIndexer.java`
+3. `TXTSearcher.java`
 4. Interagire con `TXTSearcher.java` tramite console, inserendo query del tipo:
 - title:<termine>
 - content:<termine>
